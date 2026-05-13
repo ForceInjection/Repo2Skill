@@ -1,0 +1,22 @@
+name: repo2skill
+version: 0.2.0
+trust-level: L1
+allowed-tools:
+  - Read
+  - Write
+  - Bash
+  - Glob
+  - Grep
+dependencies:
+  - typer
+  - pydantic
+  - gitpython
+  - jinja2
+  - pyyaml
+security:
+  g1-passed: true
+  g2-score: 0.0
+  g3-passed: false
+  g4-passed: false
+ontology:
+  relations: []

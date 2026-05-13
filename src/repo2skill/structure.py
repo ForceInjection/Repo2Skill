@@ -528,10 +528,13 @@ def _prefill_conditions(fi: _FuncInfo, imports: dict[str, set[str]]) -> Conditio
     if fi.docstring:
         c.trigger = fi.docstring.splitlines()[0].strip()
 
-    # Preconditions: inferred from dependencies
+    # Preconditions: inferred from dependencies (deduplicated by top-level package)
+    seen_pkgs = set()
     for ext in imports.get("external", set()):
         pkg = ext.split(".")[0]
-        c.preconditions.append(f"{pkg} installed")
+        if pkg not in seen_pkgs:
+            seen_pkgs.add(pkg)
+            c.preconditions.append(f"{pkg} installed")
 
     # File patterns: from args with Path type hints
     for arg in fi.args:
@@ -821,5 +824,5 @@ def _derive_skill_name(module: str, fi: _FuncInfo | None) -> str:
         parts = parts[:-1]
     name = " ".join(p.replace("_", " ").title() for p in parts if p)
     if fi and fi.name not in ("__init__", "main", "run"):
-        name = f"{name} — {fi.name}"
+        name = f"{name} - {fi.name}"
     return name

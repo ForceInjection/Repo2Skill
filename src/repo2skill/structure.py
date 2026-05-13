@@ -725,6 +725,46 @@ def _read_readme(root: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _is_skillable_module(module: str, funcs: list[_FuncInfo]) -> bool:
+    """Filter out modules that shouldn't become candidate skills.
+
+    Returns False for: test files, private modules, empty modules, modules
+    with only private/internal functions.
+    """
+    parts = module.split(".")
+
+    # Skip test directories
+    if any(p in ("tests", "test") or p.startswith("test_") for p in parts):
+        return False
+
+    # Skip private modules (e.g., _internal, __init__ only)
+    if parts and parts[-1].startswith("_"):
+        return False
+
+    # Skip modules with no public functions
+    public_funcs = [f for f in funcs if not f.name.startswith("_")]
+    if not public_funcs:
+        return False
+
+    # Skip thin CLI wrappers (scripts/ that just call main())
+    if "scripts" in parts and len(public_funcs) <= 1:
+        main_only = all(
+            f.name == "main" or f.name.startswith("_")
+            for f in funcs
+        )
+        if main_only:
+            return False
+
+    # Skip if the primary function is __init__ (constructors aren't
+    # standalone — classes are better represented by their public methods).
+    # Check funcs[0] (unfiltered), not public_funcs, because __init__
+    # starts with _ and is excluded from public_funcs.
+    if funcs and funcs[0].name == "__init__":
+        return False
+
+    return True
+
+
 def analyze_repo(source: str) -> AnalysisResult:
     """Analyze a repository and produce an AnalysisResult with four-tuple annotations.
 
@@ -769,9 +809,16 @@ def analyze_repo(source: str) -> AnalysisResult:
     for fi in all_funcs:
         funcs_by_module.setdefault(fi.module, []).append(fi)
 
-    # Pre-fill four-tuple for each function and create Skill objects
+    # Pre-fill four-tuple for each module and create Skill objects
     skills: list[Skill] = []
-    for i, (mod, funcs) in enumerate(sorted(funcs_by_module.items()), start=1):
+    skill_id = 0
+    for mod, funcs in sorted(funcs_by_module.items()):
+        # Pre-filter: skip modules that aren't useful as skills
+        if not _is_skillable_module(mod, funcs):
+            continue
+
+        skill_id += 1
+
         # Combine imports across all files in this module
         combined_imports: dict[str, set[str]] = {"internal": set(), "external": set()}
         for rel, imps in all_imports.items():
@@ -786,7 +833,7 @@ def analyze_repo(source: str) -> AnalysisResult:
             continue
 
         skill = Skill(
-            id=f"sk{i}",
+            id=f"sk{skill_id}",
             name=_derive_skill_name(mod, primary),
             description=primary.docstring.splitlines()[0] if primary.docstring else f"Module {mod}",
             conditions=_prefill_conditions(primary, combined_imports),

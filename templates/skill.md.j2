@@ -1,0 +1,113 @@
+---
+name: {{ name }}
+description: {{ description }}
+version: {{ version }}
+dependencies:
+{% if dependencies %}
+{% for dep in dependencies %}
+  - {{ dep }}
+{% endfor %}
+{% else %}  []{% endif %}
+allowed-tools:
+{% if allowed_tools %}
+{% for tool in allowed_tools %}
+  - {{ tool }}
+{% endfor %}
+{% else %}  []{% endif %}
+trust-level: {{ trust_level }}
+---
+
+# {{ name }}
+
+## Conditions
+
+### Trigger
+
+{{ conditions_trigger }}
+
+### Preconditions
+
+{% if preconditions %}
+{% for p in preconditions %}
+- {{ p }}
+{% endfor %}
+{% else %}
+- None
+{% endif %}
+
+### File Patterns
+
+{% if file_patterns %}
+{% for fp in file_patterns %}
+- `{{ fp }}`
+{% endfor %}
+{% else %}
+- `*`
+{% endif %}
+
+## Policy
+
+### Type
+
+{{ policy_type }}
+
+### Entry Point
+
+`{{ policy_entry }}`
+
+### Steps
+
+{% if policy_steps %}
+{% for step in policy_steps %}
+{{ loop.index }}. {{ step }}
+{% endfor %}
+{% else %}
+_No steps defined._
+{% endif %}
+
+### Dependencies
+
+{% if dependencies %}
+{% for dep in dependencies %}
+- {{ dep }}
+{% endfor %}
+{% else %}
+- None
+{% endif %}
+
+## Termination
+
+### Success Criteria
+
+{{ termination_success }}
+
+{% if termination_schema %}
+### Output Schema
+
+```json
+{{ termination_schema | tojson(indent=2) }}
+```
+{% endif %}
+
+## Interface
+
+### Parameters
+
+{% if interface_params %}
+| Parameter | Type |
+|-----------|------|
+{% for name, typ in interface_params.items() %}
+| `{{ name }}` | `{{ typ or 'Any' }}` |
+{% endfor %}
+{% else %}
+_No parameters defined._
+{% endif %}
+
+## Security
+
+- **Trust Level**: {{ trust_level }}
+- **G1 Passed**: {{ g1_passed }}
+- **G2 Score**: {{ g2_score }}
+- **Allowed Tools**: {% if allowed_tools %}{{ allowed_tools | join(', ') }}{% else %}None{% endif %}
+- **Network Access**: Denied
+- **Filesystem Scope**: `$(workspace)/*`

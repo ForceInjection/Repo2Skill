@@ -1,23 +1,29 @@
 name: {{ name | lower | replace(' ', '-') | replace('_', '-') }}
 version: {{ version }}
-{% if source %}source: {{ source }}{% endif %}
+{%- if source %}
+source: {{ source }}
+{%- endif %}
 trust-level: {{ trust_level }}
-allowed-tools:{% if allowed_tools %}
-{% for tool in allowed_tools %}
-  - {{ tool }}{% endfor %}{% else %} []{% endif %}
+allowed-tools:{%- if allowed_tools -%}
+{%- for tool in allowed_tools %}
+  - {{ tool }}
+{%- endfor -%}
+{%- else %} []{%- endif %}
 dependencies:
-{% if dependencies %}
-{% for dep in dependencies %}
-  - {{ dep }}{% endfor %}
-{% else %}  []{% endif %}
+{%- if dependencies -%}
+{%- for dep in dependencies %}
+  - {{ dep }}
+{%- endfor -%}
+{%- else %}  []{%- endif %}
 security:
   g1-passed: {{ g1_passed | lower }}
   g2-score: {{ g2_score }}
   g3-passed: false
   g4-passed: false
 ontology:
-  relations:{% if ontology_relations %}
-{% for rel in ontology_relations %}
+  relations:{%- if ontology_relations -%}
+{%- for rel in ontology_relations %}
     - type: {{ rel.type }}
-      target: {{ rel.target }}{% endfor %}
-{% else %} []{% endif %}
+      target: {{ rel.target }}
+{%- endfor -%}
+{%- else %} []{%- endif %}

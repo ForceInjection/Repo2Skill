@@ -183,7 +183,7 @@ def main(
     # Step 5: Assemble — render templates and write output (L0 baseline)
     # =========================================================================
     if use_suite and len(selected) > 1:
-        suite_dir = _assemble_as_suite(selected, result, out, source)
+        suite_dir = _assemble_as_suite(selected, result, out, source, trust_level="L0")
         skill_dirs = [suite_dir]
     else:
         skill_dirs = []
@@ -299,6 +299,7 @@ def _assemble_as_suite(
     result,  # AnalysisResult
     out: Path,
     source: str,
+    trust_level: str = "L0",
 ) -> Path:
     """Assemble selected skills as a Skill Suite."""
     relations = infer_relations(selected, result.dependency_graph)
@@ -313,7 +314,9 @@ def _assemble_as_suite(
         relations=relations,
     )
 
-    suite_dir = assemble_suite(suite_config, selected, out, source=source)
+    suite_dir = assemble_suite(
+        suite_config, selected, out, source=source, trust_level=trust_level,
+    )
     typer.echo(f"Assembled skill suite at: {suite_dir}")
     return suite_dir
 

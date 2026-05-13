@@ -573,10 +573,12 @@ def _prefill_policy(fi: _FuncInfo, imports: dict[str, set[str]]) -> Policy:
         if not p.steps:
             p.steps = [fi.docstring.splitlines()[0].strip()]
 
-    # Dependencies
+    # Dependencies (filter __future__ and stdlib)
+    _NON_PIP = {"__future__"} | _stdlib_top_level()
     for ext in sorted(imports.get("external", set())):
         pkg = ext.split(".")[0]
-        p.dependencies.append(pkg)
+        if pkg not in _NON_PIP:
+            p.dependencies.append(pkg)
     # De-duplicate while preserving order
     seen = set()
     p.dependencies = [d for d in p.dependencies if not (d in seen or seen.add(d))]
@@ -817,12 +819,19 @@ def analyze_repo(source: str) -> AnalysisResult:
 
 
 def _derive_skill_name(module: str, fi: _FuncInfo | None) -> str:
-    """Derive a human-readable skill name from module and function info."""
-    # Convert module name to title case
-    parts = module.split(".")
-    if parts[-1] == "__init__":
-        parts = parts[:-1]
+    """Derive a human-readable skill name from module and function info.
+
+    Strips common path prefixes (src/, tests/, repo2skill/) and uses
+    only the last 2-3 path segments for readability.
+    """
+    # Split path and keep meaningful tail segments
+    parts = [p for p in module.split(".") if p not in ("", "src", "tests", "__init__")]
+    # For deeply nested modules, keep last 3 segments at most
+    if len(parts) > 3:
+        parts = parts[-3:]
+    # Convert segments to title case
     name = " ".join(p.replace("_", " ").title() for p in parts if p)
-    if fi and fi.name not in ("__init__", "main", "run"):
+    # Append function name only if it's the real entry point (skip __init__)
+    if fi and fi.name not in ("__init__", "main", "run") and fi.name not in name.lower():
         name = f"{name} - {fi.name}"
     return name

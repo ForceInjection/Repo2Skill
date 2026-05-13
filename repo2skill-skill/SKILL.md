@@ -165,6 +165,60 @@ confidence = (recurrence + verification + non_obviousness + generalizability) / 
 
 Adjust up or down by up to 0.1 based on qualitative judgment (e.g., a skill being the sole entry point to a critical subsystem deserves a boost). Always provide `reasoning` explaining any override from the rule-based baseline.
 
+### Scoring Adjustments
+
+Apply these modifiers to the baseline scores to correct for structurer biases:
+
+**Bonuses** (add to the criterion):
+| Condition | Criterion | Adjustment | Reason |
+|-----------|-----------|------------|--------|
+| CLI entry (in `pyproject.toml [project.scripts]` or has `if __name__ == "__main__"`) | Generalizability | +0.2 | CLI tools have clear invocation patterns |
+| High fan-in (referenced by 3+ other modules in `dependency_graph`) | Non-obviousness | +0.2 | Widely-used functions are infrastructure worth documenting |
+| Complete docstring (has Args + Returns + Raises sections) | Verification | +0.2 | Well-documented code produces richer skills |
+
+**Penalties** (subtract from the criterion):
+| Condition | Criterion | Adjustment | Reason |
+|-----------|-----------|------------|--------|
+| `__init__` method | Generalizability | -0.2 | Constructors are class-bound, not standalone |
+| Test function (module path contains `test/` or `tests/`) | Recurrence | -0.3 | Test helpers follow common patterns |
+| Private function (name starts with `_`) | Generalizability | -0.2 | Private functions have narrow reuse scope |
+
+### Workflow Merging (Granularity Fix)
+
+The structurer produces **function-level** candidates (one per module). To create useful skills, merge related functions into **workflow-level** skills:
+
+1. **Same-module merge**: If multiple candidates come from the same module, merge them into a single workflow skill. Use the most public function as the entry point, and list the others as sub-steps.
+
+2. **Call-chain merge**: Use `dependency_graph` edges to find functions that call each other. If function A calls B and B calls C, merge A+B+C into one skill with A as the entry. Trace up to 3 levels deep.
+
+3. **Don't merge**: Keep the following as standalone (don't merge into core skills):
+   - Test helpers (from `test_*` modules)
+   - Utility scripts (from `scripts/` directories)
+   - Functions with no callers and no callees (leaf nodes with no edges)
+
+After merging:
+- Set `policy.type` to `"workflow"` (instead of `"function"` or `"script"`)
+- Set `policy.entry` to the top-level entry function
+- Write `policy.steps` as a sequence describing the merged workflow, not individual function calls
+
+### Context Enrichment (Quality Fix)
+
+The structurer fills fields with raw docstrings. Enrich them using these sources:
+
+**description**: Combine in order of priority:
+1. `readme_summary` first paragraph (repo-level purpose)
+2. The entry function's full docstring (first paragraph only, not just the first line)
+
+**conditions.trigger**: Write as a user intent: "User asks to [purpose from description]"
+
+**policy.steps**: Rewrite each step:
+- **Before**: `"Use module.func()"` (function reference)
+- **After**: Extract from `func()`'s docstring. If the docstring says "Parse all Python files via AST", write "Parse all Python files via AST". Drop the `"Use "` prefix. If no docstring, keep the function name but add context from surrounding code.
+
+**policy.dependencies**: Remove from the list:
+- `__future__` (compiler directive, not a runtime dependency)
+- Python stdlib modules (use `analysis.json`'s internal classification to identify)
+
 ### Candidate Presentation Format
 
 ```text

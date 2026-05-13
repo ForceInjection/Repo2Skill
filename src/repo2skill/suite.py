@@ -313,6 +313,7 @@ def assemble_suite(
     output_dir: Path,
     source: str = "",
     version: str = "0.1.0",
+    trust_level: str = "L1",
 ) -> Path:
     """Create a Skill Suite directory with suite.yaml and per-skill subdirectories.
 
@@ -322,6 +323,7 @@ def assemble_suite(
         output_dir: Parent output directory.
         source: Original repo source URL/path.
         version: Version string.
+        trust_level: Trust level for the suite (default L1 from G1 scan).
 
     Returns:
         Path to the created suite directory.
@@ -330,8 +332,8 @@ def assemble_suite(
 
     from repo2skill.assemble import assemble_skill
 
-    # Create suite directory
-    suite_name = suite_config.name.lower().replace(" ", "-").replace("_", "-")
+    # Create suite directory (sanitize name)
+    suite_name = _sanitize_dirname(suite_config.name)
     suite_dir = output_dir / f"{suite_name}-suite"
     suite_dir.mkdir(parents=True, exist_ok=True)
 
@@ -348,8 +350,16 @@ def assemble_suite(
         "description": suite_config.description,
         "version": version,
         "source": source,
-        "trust_level": "L1",  # suite inherits trust level from G1 scan
-        "skills": [{"id": s.id, "name": s.name, "description": s.description} for s in candidates],
+        "trust_level": trust_level,
+        "skills": [
+            {
+                "id": s.id,
+                "name": s.name,
+                "description": s.description,
+                "path": f"./{_sanitize_dirname(s.name)}-skill/",
+            }
+            for s in candidates
+        ],
         "relations": suite_config.relations,
     }
 
@@ -395,6 +405,13 @@ def assemble_suite(
 
     logger.info("Assembled skill suite at %s", suite_dir)
     return suite_dir
+
+
+def _sanitize_dirname(name: str) -> str:
+    """Collapse non-alphanumeric sequences into a single hyphen."""
+    import re
+    sanitized = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return sanitized
 
 
 def _write_suite_readme(

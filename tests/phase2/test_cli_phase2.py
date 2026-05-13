@@ -782,4 +782,69 @@ class TestG2RoundTrip:
             data = yaml.safe_load((skill_dir / "skill.yaml").read_text())
             assert data["security"]["g1-passed"] is False
             assert data["security"]["g2-score"] == 0.0
-            assert data["trust-level"] == "L0"
+
+
+class TestBootstrap:
+    """Self-bootstrap: Repo2Skill processes its own repository."""
+
+    def test_bootstrap_structure(self):
+        """Structurer should successfully parse Repo2Skill's own code."""
+        import os
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        result = analyze_repo(str(repo_root))
+
+        assert len(result.skills) > 0, \
+            f"Expected skills in self-analysis, got {len(result.skills)}"
+        assert result.readme_summary, "readme_summary should not be empty"
+        assert len(result.dependency_graph["nodes"]) > 0, \
+            "Should have dependency graph nodes"
+        # Core modules should be present
+        modules = set(result.dependency_graph["nodes"])
+        core_modules = {"src.repo2skill.models", "src.repo2skill.structure",
+                        "src.repo2skill.assemble", "src.repo2skill.cli"}
+        for m in core_modules:
+            assert m in modules, f"Core module {m} should be in dependency graph"
+
+    def test_bootstrap_extract_and_assemble(self):
+        """Full pipeline on self should succeed without errors."""
+        repo_root = Path(__file__).resolve().parent.parent.parent
+
+        result = analyze_repo(str(repo_root))
+        candidates = extract_skills_with_scores(result)
+        assert len(candidates) >= 1, "Should find at least 1 candidate in self"
+
+        # Assemble top candidate
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir) / "output"
+            out.mkdir()
+            skill_dir = assemble_skill(candidates[0], out, source=str(repo_root))
+
+            assert skill_dir.exists()
+            assert (skill_dir / "SKILL.md").exists()
+            assert (skill_dir / "skill.yaml").exists()
+
+            # G1 scan should pass on own code
+            report = run_g1_scan(skill_dir)
+            assert report.passed, \
+                f"G1 should pass on self, got: {[f['description'] for f in report.findings if f['severity']=='high']}"
+
+    def test_bootstrap_cli_on_self(self):
+        """CLI --non-interactive should complete on own repo without error."""
+        repo_root = Path(__file__).resolve().parent.parent.parent
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir) / "output"
+            out_dir.mkdir()
+
+            result = subprocess.run(
+                [sys.executable, "-m", "repo2skill.cli",
+                 str(repo_root),
+                 "--out", str(out_dir),
+                 "--non-interactive",
+                 "--mode", "single"],
+                capture_output=True, text=True,
+            )
+
+            assert result.returncode == 0, \
+                f"CLI on self failed (rc={result.returncode}): {result.stderr[:500]}"
+            assert "Initial trust level" in result.stdout

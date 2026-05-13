@@ -1,22 +1,24 @@
 suite-id: {{ name | lower | replace(' ', '-') | replace('_', '-') }}
 version: {{ version }}
-{% if source %}source: {{ source }}{% endif %}
+{%- if source %}
+source: {{ source }}
+{%- endif %}
 description: {{ description }}
 trust-level: {{ trust_level }}
 
 skills:
-{% for skill in skills %}
+{%- for skill in skills %}
   - id: {{ skill.id }}
     name: {{ skill.name }}
     description: {{ skill.description }}
-    path: ./{{ skill.name | lower | replace(' ', '-') | replace('_', '-') }}-skill/
-{% endfor %}
+    path: {{ skill.path }}
+{%- endfor %}
 
 relations:
-{% if relations %}
-{% for rel in relations %}
+{%- if relations -%}
+{%- for rel in relations %}
   - from: {{ rel.source }}
     to: {{ rel.target }}
     type: {{ rel.type }}
-{% endfor %}
-{% else %}  []{% endif %}
+{%- endfor -%}
+{%- else %}  []{%- endif %}

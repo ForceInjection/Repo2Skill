@@ -63,7 +63,7 @@ def main() -> None:
             skills=[s.id for s in selected],
             relations=relations,
         )
-        suite_dir = assemble_suite(suite_config, selected, output_dir, source=source)
+        suite_dir = assemble_suite(suite_config, selected, output_dir, source=source, trust_level="L0")
         print(f"Assembled skill suite at: {suite_dir}")
     else:
         # Single mode

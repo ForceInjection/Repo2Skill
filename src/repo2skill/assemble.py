@@ -105,8 +105,9 @@ def assemble_skill(
     # Validate progressive disclosure token budgets
     _validate_token_budgets(md_content)
 
-    # Create output directory structure
-    skill_name = skill.name.lower().replace(" ", "-").replace("_", "-")
+    # Create output directory structure (sanitize name)
+    import re
+    skill_name = re.sub(r"[^a-z0-9]+", "-", skill.name.lower()).strip("-")
     skill_dir = output_dir / f"{skill_name}-skill"
     skill_dir.mkdir(parents=True, exist_ok=True)
 

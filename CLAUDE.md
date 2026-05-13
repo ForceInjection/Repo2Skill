@@ -16,7 +16,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 
-# Run all tests (60 tests across smoke + phase2)
+# Run all tests (62 tests across smoke + phase2)
 .venv/bin/python -m pytest tests/ -v
 
 # Run a single test
@@ -50,7 +50,6 @@ repo2skill-skill/          ← Distributable Agent Skill
 │   ├── assemble.py        ← → repo2skill.assemble / repo2skill.suite
 │   ├── audit_g1.py        ← → repo2skill.reviewer.g1.run_g1_scan()
 │   └── audit_g2.py        ← Generates review-context.md for the Agent
-└── templates/ → ../../templates  (symlink)
 
 src/repo2skill/            ← Python package
 ├── models.py              ← All Pydantic models (Skill, SkillCandidate, AnalysisResult,
@@ -61,7 +60,7 @@ src/repo2skill/            ← Python package
 ├── suite.py               ← Suite detection (4 criteria), DAG validation, suite assembly
 ├── reviewer/
 │   ├── g1.py              ← G1 deterministic static scan (17 regex/AST patterns)
-│   └── g2.py              ← Not yet created (Phase 2 G2 is Agent-driven via SKILL.md)
+│   └── g2.py              ← Intentionally absent — G2 is Agent-driven via SKILL.md
 └── cli.py                 ← typer CLI with --interactive, --mode, --force-continue, etc.
 ```
 
@@ -103,16 +102,17 @@ structure.py ───► analysis.json ───► Agent (Extractor)
 - **Trust levels**: L0 (unverified) → L1 (G1 passed, no high-severity findings) → L2 (G2 score ≥ 0.8). L3–L4 require Phase 3 infrastructure.
 - **G1 scan**: Scans Python files in the assembed skill directory. 17 patterns at high/medium/low severity. Only "high" findings block (unless `--force-continue`).
 - **`skill.yaml` uses kebab-case** (`trust-level`, `allowed-tools`, `g1-passed`, `g2-score`).
-- **`suite.yaml` uses `suite-id`** and relation keys `from`/`to` (matching design §4).
+- **`suite.yaml` uses `suite-id`** and relation keys `from`/`to` (matching design §4). Per-skill `ontology.relations` are populated from suite relations during assembly.
+- **`allowed-tools` in analysis.json**: Uses `serialization_alias="allowed-tools"` + `model_dump_json(by_alias=True)` for kebab-case output matching design §12.1. A structurer heuristic infers `[Read, Write]` from file-related params and `[Bash]` from subprocess/network imports.
 - **No network requests** in scripts (only `git clone` in structure.py).
 - **Writing scoped** to user-specified output directory only.
 
 ## Testing
 
-60 tests, all passing. Two test directories:
+62 tests, all passing. Two test directories:
 
 - **`tests/smoke/`** (8 tests) — Phase 1 smoke tests. Use `create_sample_repo()` helper to create tiny test repos. Must always pass.
-- **`tests/phase2/`** (52 tests) — Phase 2 tests covering models, G1 scan, suite detection/DAG, CLI E2E. Use both library-level and subprocess-based CLI tests. All mock-driven; no real external API calls.
+- **`tests/phase2/`** (54 tests) — Phase 2 tests covering models, G1 scan, suite detection/DAG, CLI E2E, G2 score round-trip. Use both library-level and subprocess-based CLI tests. All mock-driven; no real external API calls.
 
 Key test helpers: `create_sample_repo()` in `tests/smoke/test_phase1.py` and `create_multi_module_repo()` in `tests/phase2/test_cli_phase2.py`.
 
@@ -121,5 +121,5 @@ Key test helpers: `create_sample_repo()` in `tests/smoke/test_phase1.py` and `cr
 - **G3/G4**: Docker sandbox + permission audit (Phase 3)
 - **Multi-language**: Currently Python-only via stdlib `ast`. `tree-sitter` planned for Phase 4.
 - **Dense retrieval + Cross-Encoder**: Phase 1–2 uses deterministic rules. The design §3.2 specifies `sentence-transformers` for Phase 3+.
-- **`audit_g3.py` / `audit_g4.py`**: Listed in design §4 but not created.
-- **`reviewer/g2.py`**: G2 review is currently Agent-driven via `SKILL.md`, not a Python module. The `audit_g2.py` wrapper generates a review context `.md` file for the Agent to consume.
+- **`audit_g3.py` / `audit_g4.py`**: Listed in design §4 but not created. `--skip-g3` exists as a placeholder flag in CLI.
+- **`reviewer/g2.py`**: Intentionally absent — G2 review is Agent-driven via `SKILL.md`. The `audit_g2.py` wrapper generates a review context `.md` file for the Agent to consume.

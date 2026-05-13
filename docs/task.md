@@ -38,9 +38,9 @@
 | 指标       | 数值                                    |
 | ---------- | --------------------------------------- |
 | 总任务数   | 42                                      |
-| 已完成     | 17 (Phase 1: 9, Phase 2: 6, Phase 4: 2) |
+| 已完成     | 20 (Phase 1: 9, Phase 2: 7, Phase 4: 4) |
 | 部分完成   | 3 (P2-T7, P3-T7, Phase 4 套件)          |
-| 测试数量   | 60 (8 smoke + 52 phase2)                |
+| 测试数量   | 62 (8 smoke + 54 phase2)                |
 | 测试通过率 | 100%                                    |
 
 **架构决定**：Agent（Claude Code）承担所有 LLM 推理（Extractor + Reviewer G2），Python 脚本仅做确定性工作。无 API key 传入 Python 文件，无 `llm_client.py` / `extractor_llm.py`。
@@ -69,7 +69,7 @@
 ## Phase 2 G1/G2 验证与交互完善
 
 **目标**：引入静态与语义两级安全验证，完善 Agent ↔ 用户交互。
-**状态**：🔶 推进中（6/8 完成，1 部分完成，1 未开始）
+**状态**：🔶 推进中（7/8 完成，1 部分完成）
 
 | ID    | 状态 | 标题                               | 设计锚点                                                                                      | 依赖         | 交付物                                                                                | 验收标准                                                                                                                                          | 实现备注                                                                                                                  |
 | ----- | ---- | ---------------------------------- | --------------------------------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
@@ -78,8 +78,8 @@
 | P2-T3 | ✅   | Extractor 升级为 Agent-in-the-loop | [§2.3](./design.md#23-分层角色架构-script--agent-混合)                                        | P1-T5        | Agent 协议（输入/输出 JSON schema）+ prompts                                          | 对同一仓库，Agent 版 Recall ≥ 规则版 × 1.3                                                                                                        | Agent 通过 `SKILL.md` 中的 Extractor 指令执行推理，非 Python API 调用；`extract.py` 脚本提供规则基线                      |
 | P2-T4 | ✅   | G2 审查提示生成                    | [§2.2](./design.md#22-安全验证体系-g1g4)                                                      | P2-T2        | `scripts/audit_g2.py`：聚合源码 + SKILL.md diff 生成审查提示                          | 生成的提示长度 ≤ 8k tokens，且包含幻觉检测、prompt 注入、元数据一致性三类检查点                                                                   | 生成 `g2_<skill>.md` 上下文文件（skill 内容 + analysis.json 上下文并列）；Agent 读取并执行审查                            |
 | P2-T5 | ✅   | G2 分数映射                        | [§5.1](./design.md#51-交互式流程)（G2 分数映射说明）、[§8.1](./design.md#81-技能注册中心就绪) | P2-T4        | `g2_score` 计算器：类别 → 区间数值；写入 `skill.yaml` 使用 kebab-case `g2-score` 字段 | 输出 ∈ `[0.0, 1.0]` 且符合 `完整 → [0.9, 1.0]` / `部分 → [0.5, 0.9)` / `存疑 → [0.0, 0.5)` 规则；`skill.yaml` 中字段名为 `g2-score`（kebab-case） | 分数映射与 verdict 阈值定义在 `SKILL.md` G2 Review 部分；Agent 负责执行计算和写入                                         |
-| P2-T6 | ✅   | 交互式候选展示                     | [§3.2](./design.md#32-用户故事)、[§5.1](./design.md#51-交互式流程)                            | P1-T5        | Agent 端脚本模板：候选清单 + 多选输入解析                                             | 支持 `1,3` / `all` / `none` / `描述文本` 四种输入，并给出错误提示                                                                                 | CLI `--interactive` 模式支持 ID 选择（逗号分隔）和 `all`；无效 ID 给出警告并回退                                          |
-| P2-T7 | 🔶   | 异常回退机制                       | [§5.3](./design.md#53-异常处理与回退)                                                         | P2-T2        | 回退逻辑：克隆失败 / 无候选 / G1 高危 / G3 超时 / G4 越权                             | 每种异常均有单元测试覆盖，输出退出码与日志                                                                                                        | 克隆失败、无候选、G1 高危阻断、`--force-continue` 覆盖已实现；G3/G4 异常属于 Phase 3                                      |
+| P2-T6 | ✅   | 交互式候选展示                     | [§3.2](./design.md#32-用户故事)、[§5.1](./design.md#51-交互式流程)                            | P1-T5        | Agent 端脚本模板：候选清单 + 多选输入解析                                             | 支持 `1,3` / `all` / `none` / `描述文本` 四种输入，并给出错误提示                                                                                 | CLI `--interactive` 模式支持 ID 选择（逗号分隔）、`all`、`none`；无效 ID 警告并回退；自由文本描述（如"LLM配置模块"）由 Agent 在对话模式中处理 |
+| P2-T7 | 🔶   | 异常回退机制                       | [§5.3](./design.md#53-异常处理与回退)                                                         | P2-T2        | 回退逻辑：克隆失败 / 无候选 / G1 高危 / G3 超时 / G4 越权                             | 每种异常均有单元测试覆盖，输出退出码与日志                                                                                                        | 克隆失败、无候选、G1 高危阻断、`--force-continue` 覆盖均已实现并测试；G3 超时/G4 越权属 Phase 3 范围，`--skip-g3` 占位标志已就绪 |
 | P2-T8 | ✅   | Trust Level L0–L2 计算器           | [§6.1](./design.md#61-trust-level-计算)                                                       | P2-T2、P2-T5 | `trust_level.py`：根据 G1/G2 结果输出 L0/L1/L2                                        | 覆盖率测试 ≥ 90%，边界情况（G1 通过但 G2 存疑）结果为 L1                                                                                          | 计算逻辑内联在 CLI 和 SKILL.md 中，无独立 `trust_level.py`；G1 通过 → L1，G1 + G2 ≥ 0.8 → L2                              |
 
 ---
@@ -119,7 +119,7 @@
 | P4-T6 | ✅   | `assemble.py --suite`      | [§5.4](./design.md#54-套件模式执行调整)                                              | P4-T5 | 扩展 `assemble.py`：一次性生成 `<output-suite>/` 与所有子技能             | 子技能目录数 = 识别出的技能数；顶层 `README.md` 自动生成                                                                          | `assemble_suite()` 生成 suite.yaml + 调用 `assemble_skill()` 生成各子技能目录；`_write_suite_readme()` 自动生成 `README.md` |
 | P4-T7 | ⬜   | 跨技能集成测试             | [§5.4](./design.md#54-套件模式执行调整)                                              | P4-T6 | 端到端流水线生成器：按 `requires-output-from` 链路串联                    | 对 `data-pipeline` 套件生成 ≥ 1 条覆盖全部成员的流水线测试                                                                        |                                                                                                                             |
 | P4-T8 | ⬜   | 套件级 Trust Level         | [§6.1](./design.md#61-trust-level-计算)、[§2.5](./design.md#25-技能套件-skill-suite) | P4-T7 | 取成员最低值 + 关系完整性补偿                                             | 当任一成员 < L2 时套件 ≤ L2；关系图不完整时套件降一级                                                                             | 当前套件写死 L1                                                                                                             |
-| P4-T9 | ⬜   | SkillNet 本体写入          | [§8.3](./design.md#83-skillnet-本体标注)                                             | P4-T6 | `skill.yaml.ontology.relations` 与 `skill.yaml.dependencies` 字段自动填充 | 四种关系类型（`depends-on`/`composes`/`bundled-with`/`requires-output-from`）均可生成；`dependencies` 按 §12.2 结构写入运行时依赖 | 关系在 `suite.yaml` 中生成；子技能的 `skill.yaml.ontology.relations` 未自动填充                                             |
+| P4-T9 | ⬜   | SkillNet 本体写入          | [§8.3](./design.md#83-skillnet-本体标注)                                             | P4-T6 | `skill.yaml.ontology.relations` 与 `skill.yaml.dependencies` 字段自动填充 | 四种关系类型（`depends-on`/`composes`/`bundled-with`/`requires-output-from`）均可生成；`dependencies` 按 §12.2 结构写入运行时依赖 | 关系在 `suite.yaml` 中生成；`assemble_suite()` 自动将每个子技能作为 source 的关系注入其 `skill.yaml.ontology.relations`；仅 bundled-with 关系常见，depends-on/requires-output-from 取决于模块依赖图与 skill 映射的精度 |
 
 ---
 

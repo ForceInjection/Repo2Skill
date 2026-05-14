@@ -2,8 +2,8 @@
 
 **配套设计文档**：[design.md](./design.md)
 **版本**：1.0
-**日期**：2026-05-13
-**状态**：Phase 1+2 完成，Suite Mode + Agent Enrich 实现，Phase 4 套件提前（5/9）。Phase 3（G3/G4）规划中。
+**日期**：2026-05-14
+**状态**：Phase 1+2 完成，Suite Mode + Agent Enrich 实现，Phase 4 套件完成（7/9）。Phase 3（G3/G4）规划中。Phase 5 自举测试基础已完成。论文改进（multi-trigger, completeness, G1 扩展, SkillNet 重叠检测）已实现。
 
 本文档将 [design.md](./design.md) §11 开发路线图中的五个阶段展开为可追踪、可验收的具体任务。每条任务包含：
 
@@ -38,9 +38,9 @@
 | 指标       | 数值                                    |
 | ---------- | --------------------------------------- |
 | 总任务数   | 42                                      |
-| 已完成     | 21 (Phase 1: 9, Phase 2: 7, Phase 4: 5) |
-| 部分完成   | 2 (P2-T7, P3-T7)                        |
-| 测试数量   | 65 (8 smoke + 57 phase2)                |
+| 已完成     | 23 (Phase 1: 9, Phase 2: 7, Phase 4: 7) |
+| 部分完成   | 3 (P2-T7, P3-T7, P5-T1)                 |
+| 测试数量   | 110 (8 smoke + 57 phase2 + 45 new)      |
 | 测试通过率 | 100%                                    |
 
 **架构决定**：
@@ -49,6 +49,15 @@
 - Python 脚本仅做确定性工作：AST 解析、依赖图构建、机械式四元组预标注、Jinja2 模板渲染、正则安全扫描
 - Structurer 产出全量 `analysis.json`（无过滤、无质量判断），Agent 自主筛选和重写
 - 新增 Enrich 步骤：Agent 在组装后对 SKILL.md 进行实质性改写（Steps 从 "Use func()" → 自然语言，名称从模块路径 → 功能性命名）
+- Structurer 主函数检测升级为三级启发式（`has_main_block` > 公共 API > AST 大小），避免误选内部辅助函数
+- Extractor 评分新增 centrality 维度（被依赖度），降低 docstring 权重，测试模块自动降权
+- Suite 关系推断新增共导入 `composes` 检测（同一编排器导入 ≥3 个候选），修复了 `src.xxx` vs `xxx` 命名不匹配
+- 套件 Trust Level 由 `compute_suite_trust_level()` 计算：min(成员级别) + 关系完整性降级
+- Trigger 从单字符串升级为多模式匹配列表（`triggers: list[str]`），支持多个触发短语
+- Extractor 新增 Completeness 第 6 维度（参数覆盖率 + 文档完整性），评分归一化调整为 /6.0
+- G1 规则从 17 条扩展到 22 条：新增硬编码路径检测、Windows 盘符路径、嵌入式密钥、密钥环境变量
+- Suite 新增 `detect_skill_overlap()`：Jaccard 相似度检测冗余/重叠技能对（论文 §8.3 SkillNet）
+- 论文基准对齐：《Automating Skill Acquisition》(2603.11808v2) 的四元组、渐进式披露、G1–G4 安全验证已全部覆盖；Dense Retrieval + Cross-Encoder 和 G3/G4 沙箱待 Phase 3
 
 ---
 
@@ -78,7 +87,7 @@
 
 | ID    | 状态 | 标题                               | 设计锚点                                                                                      | 依赖         | 交付物                                                                                | 验收标准                                                                                                                                          | 实现备注                                                                                                                                      |
 | ----- | ---- | ---------------------------------- | --------------------------------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| P2-T1 | ✅   | G1 规则库设计                      | [§2.2](./design.md#22-安全验证体系-g1g4)                                                      | P1-T9        | `rules/g1_patterns.yaml`：危险 API 正则 + AST 规则                                    | 覆盖 `eval` / `exec` / `os.system` / `socket` / `shutil.rmtree` 等 ≥ 15 条规则                                                                    | 17 条规则内联于 `reviewer/g1.py` 中 `DANGEROUS_PATTERNS` 列表，非独立 YAML 文件                                                               |
+| P2-T1 | ✅   | G1 规则库设计                      | [§2.2](./design.md#22-安全验证体系-g1g4)                                                      | P1-T9        | `rules/g1_patterns.yaml`：危险 API 正则 + AST 规则                                    | 覆盖 `eval` / `exec` / `os.system` / `socket` / `shutil.rmtree` 等 ≥ 15 条规则                                                                    | 22 条规则内联于 `reviewer/g1.py` 中 `DANGEROUS_PATTERNS` 列表（含硬编码路径、嵌入式密钥检测），非独立 YAML 文件                        |
 | P2-T2 | ✅   | `audit_g1.py`                      | [§2.2](./design.md#22-安全验证体系-g1g4)、[§7](./design.md#7-多维度质量评估)                  | P2-T1        | `scripts/audit_g1.py` + `g1_report.json` schema                                       | 已知含 `eval` 样例被识别；无报警样例通过；报告含 `vulnerability-rate` 字段                                                                        | `G1Report.passed` 布尔值控制阻断；`findings[]` 含 severity（high/medium/low）；`vulnerability_rate` 字段已加入 `G1Report`                     |
 | P2-T3 | ✅   | Extractor 升级为 Agent-in-the-loop | [§2.3](./design.md#23-分层角色架构-script--agent-混合)                                        | P1-T5        | Agent 协议（输入/输出 JSON schema）+ prompts                                          | 对同一仓库，Agent 版 Recall ≥ 规则版 × 1.3                                                                                                        | Agent 通过 `SKILL.md` 中的 Extractor 指令执行推理，非 Python API 调用；`extract.py` 脚本提供规则基线                                          |
 | P2-T4 | ✅   | G2 审查提示生成                    | [§2.2](./design.md#22-安全验证体系-g1g4)                                                      | P2-T2        | `scripts/audit_g2.py`：聚合源码 + SKILL.md diff 生成审查提示                          | 生成的提示长度 ≤ 8k tokens，且包含幻觉检测、prompt 注入、元数据一致性三类检查点                                                                   | 生成 `g2_<skill>.md` 上下文文件（skill 内容 + analysis.json 上下文并列）；Agent 读取并执行审查                                                |
@@ -114,7 +123,7 @@
 ## Phase 4 多语言扩展与技能套件
 
 **目标**：覆盖 JS/TS、Go、Rust；支持将复杂仓库映射为相关联的技能套件。
-**状态**：⬜ 多语言未开始；🔶 套件模式提前实现（P4-T3/T4/T5/T6/T9 完成，5/9）
+**状态**：⬜ 多语言未开始；🔶 套件模式完成（P4-T3/T4/T5/T6/T7/T8/T9 完成，7/9）
 
 | ID    | 状态 | 标题                       | 设计锚点                                                                             | 依赖  | 交付物                                                                    | 验收标准                                                                                                                          | 实现备注                                                                                                                                                                                     |
 | ----- | ---- | -------------------------- | ------------------------------------------------------------------------------------ | ----- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -122,22 +131,22 @@
 | P4-T2 | ⬜   | 多语言 G1 规则扩展         | [§2.2](./design.md#22-安全验证体系-g1g4)                                             | P4-T1 | `rules/g1_patterns.{js,go,rs}.yaml`                                       | 每语言 ≥ 8 条危险 API 规则；false positive 率 < 10%                                                                               |                                                                                                                                                                                              |
 | P4-T3 | ✅   | 套件触发准则实现           | [§2.5](./design.md#25-技能套件-skill-suite)                                          | P4-T1 | `suite_detector.py`：候选数/Token 估算/入口点/依赖图/权限差异五准则       | 对 `data-pipeline` 级仓库触发套件；简单工具仓库保持单技能                                                                         | `suite.py` 中 `detect_suite_mode()`：4 条准则；BFS 连通分量检测；无需 `tree-sitter`                                                                                                          |
 | P4-T4 | ✅   | `suite.yaml` schema + 渲染 | [§4](./design.md#4-技能结构与组件)                                                   | P4-T3 | `templates/suite.yaml.j2` + 校验器                                        | 生成的 `suite.yaml` 含 `suite-id/version/source/skills/relations/trust-level` 全部字段                                            | `suite-id`（kebab-case）、`from`/`to` 关系键、`trust-level`；无独立校验器                                                                                                                    |
-| P4-T5 | ✅   | 关系标注与 DAG 校验        | [§2.5](./design.md#25-技能套件-skill-suite)、[§5.4](./design.md#54-套件模式执行调整) | P4-T4 | 两两关系评估 prompt + 图构建器 + 环检测                                   | 对已知含环案例触发模块重划分提示；无环案例通过                                                                                    | `infer_relations()`：depends-on（依赖图边）+ composes（步骤引用）+ bundled-with（同类型同工具）；DFS 环检测                                                                                  |
+| P4-T5 | ✅   | 关系标注与 DAG 校验        | [§2.5](./design.md#25-技能套件-skill-suite)、[§5.4](./design.md#54-套件模式执行调整) | P4-T4 | 两两关系评估 prompt + 图构建器 + 环检测                                   | 对已知含环案例触发模块重划分提示；无环案例通过                                                                                    | `infer_relations()`：depends-on（依赖图边）+ composes（步骤引用 + 共导入检测）+ bundled-with（同类型同工具）；DFS 环检测；修复 `_find_skill_for_module` 命名不匹配 |
 | P4-T6 | ✅   | `assemble.py --suite`      | [§5.4](./design.md#54-套件模式执行调整)                                              | P4-T5 | 扩展 `assemble.py`：一次性生成 `<output-suite>/` 与所有子技能             | 子技能目录数 = 识别出的技能数；顶层 `README.md` 自动生成                                                                          | `assemble_suite()` 生成 suite.yaml + 调用 `assemble_skill()` 生成各子技能目录；`_write_suite_readme()` 自动生成 `README.md`                                                                  |
-| P4-T7 | ⬜   | 跨技能集成测试             | [§5.4](./design.md#54-套件模式执行调整)                                              | P4-T6 | 端到端流水线生成器：按 `requires-output-from` 链路串联                    | 对 `data-pipeline` 套件生成 ≥ 1 条覆盖全部成员的流水线测试                                                                        |                                                                                                                                                                                              |
-| P4-T8 | ⬜   | 套件级 Trust Level         | [§6.1](./design.md#61-trust-level-计算)、[§2.5](./design.md#25-技能套件-skill-suite) | P4-T7 | 取成员最低值 + 关系完整性补偿                                             | 当任一成员 < L2 时套件 ≤ L2；关系图不完整时套件降一级                                                                             | 当前套件写死 L1                                                                                                                                                                              |
-| P4-T9 | ✅   | SkillNet 本体写入          | [§8.3](./design.md#83-skillnet-本体标注)                                             | P4-T6 | `skill.yaml.ontology.relations` 与 `skill.yaml.dependencies` 字段自动填充 | 四种关系类型（`depends-on`/`composes`/`bundled-with`/`requires-output-from`）均可生成；`dependencies` 按 §12.2 结构写入运行时依赖 | `assemble_suite()` 自动从 suite_config.relations 筛选各子技能的关系注入其 `skill.yaml.ontology.relations`；目前以 bundled-with 为主，depends-on/requires-output-from 需加强模块→技能映射精度 |
+| P4-T7 | ✅   | 跨技能集成测试             | [§5.4](./design.md#54-套件模式执行调整)                                              | P4-T6 | 端到端流水线生成器：按 `requires-output-from` 链路串联                    | 对 `data-pipeline` 套件生成 ≥ 1 条覆盖全部成员的流水线测试                                                                        | `TestRequiresOutputFromChains` (5 测试)：环检测、拓扑排序、混合关系、套件组装                                                |
+| P4-T8 | ✅   | 套件级 Trust Level         | [§6.1](./design.md#61-trust-level-计算)、[§2.5](./design.md#25-技能套件-skill-suite) | P4-T7 | 取成员最低值 + 关系完整性补偿                                             | 当任一成员 < L2 时套件 ≤ L2；关系图不完整时套件降一级                                                                             | `compute_suite_trust_level()` + `TestComputeSuiteTrustLevel` (8 测试)；CLI 套件模式自动计算并写入 `suite.yaml`                    |
+| P4-T9 | ✅   | SkillNet 本体写入          | [§8.3](./design.md#83-skillnet-本体标注)                                             | P4-T6 | `skill.yaml.ontology.relations` 与 `skill.yaml.dependencies` 字段自动填充 | 四种关系类型（`depends-on`/`composes`/`bundled-with`/`requires-output-from`）均可生成；`dependencies` 按 §12.2 结构写入运行时依赖 | `assemble_suite()` 自动注入；共导入检测 + 命名修复后，自举套件已包含 depends-on 和 composes（不再是全 bundled-with）              |
 
 ---
 
 ## Phase 5 自举、文档与生态对接
 
 **目标**：Repo2Skill v1.0 GA，具备分发、升级、演化能力。
-**状态**：⬜ 未开始
+**状态**：🔶 自举测试基础完成（P5-T1 部分）；其余未开始
 
 | ID    | 状态 | 标题                  | 设计锚点                                               | 依赖          | 交付物                                                               | 验收标准                                                                |
 | ----- | ---- | --------------------- | ------------------------------------------------------ | ------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| P5-T1 | ⬜   | 自举测试              | [§10](./design.md#10-自举与自我进化)                   | P4-T9         | 对 Repo2Skill 自身仓库执行 `repo2skill` 的脚本与报告                 | 生成的自描述技能通过 G1–G4，Trust Level ≥ L3                            |
+| P5-T1 | 🔶   | 自举测试              | [§10](./design.md#10-自举与自我进化)                   | P4-T9         | 对 Repo2Skill 自身仓库执行 `repo2skill` 的脚本与报告                 | 生成的自描述技能通过 G1–G4，Trust Level ≥ L3                            | `tests/phase2/test_bootstrap.py` (20 测试)：覆盖双向验证 + Suite 模式 + 流水线流；L3+ 依赖 Phase 3 G3/G4 |
 | P5-T2 | ⬜   | 用户文档              | —                                                      | P5-T1         | `docs/README.md`、`docs/quickstart.md`、`docs/faq.md`                | 新用户可在 15 分钟内完成第一个技能生成                                  |
 | P5-T3 | ⬜   | 开发者文档            | [§2.3](./design.md#23-分层角色架构-script--agent-混合) | P5-T1         | `docs/architecture.md`、`docs/contributing.md`                       | 包含组件交互图与贡献流程                                                |
 | P5-T4 | ⬜   | 注册中心对接示例      | [§8.1](./design.md#81-技能注册中心就绪)                | P5-T1         | JFrog Artifactory / AWS Agent Registry / agentskills.so 三个示例脚本 | 每个示例附带 README 与 CI 触发命令；至少一个示例在 staging 环境推送成功 |
@@ -155,8 +164,8 @@
 | M1     | Phase 1    | 可用主干         | Python 仓库端到端成功；冒烟测试绿灯          | ✅ 8 个 smoke 测试通过                  |
 | M2     | Phase 2    | 安全报告 Alpha   | G1/G2 报告可读；Trust Level ≤ L2             | 🔶 G1 完成，G2 Agent-driven，P2-T7 部分 |
 | M3     | Phase 3    | 沙箱可信 Beta    | 批处理 10 仓库无阻塞失败；平均 L3            | ⬜                                      |
-| M4     | Phase 4    | 多语言 + 套件 RC | 四语言覆盖；`data-pipeline` 级仓库正确套件化 | 🔶 套件功能提前完成；多语言未开始       |
-| M5     | Phase 5    | v1.0 GA          | 自举通过；注册中心示例可推送；文档完备       | ⬜                                      |
+| M4     | Phase 4    | 多语言 + 套件 RC | 四语言覆盖；`data-pipeline` 级仓库正确套件化 | 🔶 套件功能完成（7/9）；多语言未开始   |
+| M5     | Phase 5    | v1.0 GA          | 自举通过；注册中心示例可推送；文档完备       | 🔶 自举测试基础完成（20 测试）         |
 
 ---
 
@@ -185,3 +194,13 @@
 | Suite Mode           | Phase 4 范围                           | Phase 2 提前实现                                       | Suite 检测逻辑为确定性规则，不依赖多语言支持                        |
 | `--non-interactive`  | Phase 3 范围                           | Phase 2 提前实现                                       | CLI 基础功能，无需等待 G3/G4                                        |
 | G2 分数写入          | Python 计算器写入 `skill.yaml`         | Agent 手动执行                                         | 与 Extractor 同理；Agent 负责所有 LLM 推理和输出写入                |
+| 主函数检测           | 取模块第一个函数为 primary             | 三级启发式：`has_main_block` > 公共 API > AST 大小     | `funcs[0]` 会选到 `_setup_logging`、`_is_python_file` 等内部辅助函数 |
+| Suite 关系           | 仅依赖图边 + 步骤引用                  | 新增共导入 `composes` 检测（同一编排器导入 ≥3 个候选） | CLI 编排型仓库的模块之间没有直接导入，依赖图边无法反映流水线关系 |
+| 默认置信度阈值       | 0.8（绝对阈值）                        | 0.5（降低以适应真实仓库的分数分布）                    | 真实仓库（requests、click、rich）无一达 0.8；降低后 click/rich 正确进入 suite 模式 |
+| Extractor 评分维度   | 4 维度（Recurrence/Verification/Non-obviousness/Generalizability） | 5 维度（+ Centrality）+ 测试降权 + docstring 权重降低 | 测试函数原得分接近核心代码（差距 ~0.05），需要 centrality 和测试惩罚区分 |
+| `_find_skill_for_module` | 仅前缀匹配 entry.startswith(module + ".") | 双命名约定匹配（`src.xxx` ↔ `xxx`）+ 段级比较 | 依赖图边使用 package 名（`repo2skill.xxx`），skill entry 使用 file-path 名（`src.repo2skill.xxx`），原实现匹配失败 |
+| Trigger 字段           | 单字符串 `trigger: str`                | 多模式列表 `triggers: list[str]`，保留 `trigger` property 向后兼容 | 论文 §4.2 描述 trigger 为 pattern-matching rules，支持多个触发短语提高技能激活率 |
+| Completeness 维度     | 4 维度评分（后扩展为 5）               | 6 维度（+ Completeness）衡量参数覆盖率 + 文档完整性               | 论文 §7 提出 Feature Coverage 作为独立评估维度，可无沙箱计算 |
+| G1 规则数量           | 17 条（仅代码执行 + 网络 + 文件操作）   | 22 条（+ 硬编码路径 + Windows 路径 + 嵌入式密钥 + 密钥环境变量）   | 论文 §3.3.3 强调资产打包时消除硬编码路径和 API keys，§7 G4 要求密钥检测 |
+| SkillNet 重叠检测     | 无                                     | `detect_skill_overlap()`：Jaccard 相似度检测冗余技能对             | 论文 §8.3 描述 SkillNet 自动检测 redundant or overlapping skills |
+| 评分归一化基数        | /4.0（4 维度）→ /5.0（5 维度）         | /6.0（6 维度）                                                    | 随着维度增加调整基数，配合阈值降至 0.5 保持合理的选择率 |

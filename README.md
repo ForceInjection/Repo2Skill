@@ -4,7 +4,7 @@
 
 **Repo2Skill** 是一个遵循 Agent Skills 协议的技能包，它教会 Agent 如何解构任意 Git 仓库并输出一个符合标准的 Agent 技能（或在仓库较为复杂时，输出一个 **技能套件**）。它结合确定性脚本与 Agent 推理能力，覆盖全生命周期：分析、提取、组装、安全验证（G1/G2）、质量评分。
 
-**状态**：v0.2.0 · Phase 1+2 完成 · 65 测试通过
+**状态**：v0.2.0 · Phase 1+2+4(套件) 完成 · 110 测试通过
 
 ---
 
@@ -18,7 +18,7 @@ Anthropic 的 Agent Skills 协议标准化了技能封装方式（`SKILL.md` + f
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | **四元组模型**              | 每个技能被分解为 `(Conditions, Policy, Termination, Interface)` —— 显式、机器可检查、利于审计                        |
 | **渐进式披露**              | Level 1 frontmatter（30–100 tokens）/ Level 2 正文（200–5,000）/ Level 3 辅助资产（无上限）                          |
-| **G1 安全扫描**             | 17 条正则/AST 规则，三级（high/medium/low），高危阻断 + `--force-continue` 覆盖                                      |
+| **G1 安全扫描**             | 22 条正则/AST 规则，三级（high/medium/low），高危阻断 + `--force-continue` 覆盖；含硬编码路径及嵌入式密钥检测        |
 | **G2 语义审查**             | Agent 执行三维度评估（幻觉、注入、元数据一致性），数值评分写入 `skill.yaml`                                          |
 | **Agent 增强（Enrich）**    | Agent 在组装后实质性重写 SKILL.md：将 "Use func()" 替换为自然语言步骤，功能性命名，上下文补充                        |
 | **技能套件（Skill Suite）** | 复杂仓库映射为一组相关技能，关系经过 DAG 校验（`depends-on` / `composes` / `bundled-with` / `requires-output-from`） |
@@ -97,10 +97,10 @@ Repo2Skill/
 │   ├── extractor.py           # 规则基线评分（Agent 的提示，非决策）
 │   ├── assemble.py            # Jinja2 渲染 → 技能目录
 │   ├── suite.py               # Suite 检测（4 准则）+ DAG 校验 + 套件组装
-│   ├── reviewer/g1.py         # G1 静态扫描（17 条规则）
+│   ├── reviewer/g1.py         # G1 静态扫描（22 条规则）
 │   └── cli.py                 # typer CLI
 ├── templates/                 # Jinja2 模板（skill.md.j2, skill.yaml.j2, suite.yaml.j2）
-├── tests/                     # 65 测试（8 smoke + 57 phase2）
+├── tests/                     # 110 测试（8 smoke + 102 phase2）
 ├── docs/
 │   ├── design.md              # 完整设计文档 v1.0
 │   ├── task.md                # 5 阶段 × 42 任务（含状态追踪）
@@ -118,8 +118,8 @@ Repo2Skill/
 | 1    | 核心流水线    | Python 仓库 → `SKILL.md`，端到端跑通                 | ✅        |
 | 2    | G1 + G2       | 静态扫描 + 语义审查；Trust Level L0–L2；Agent Enrich | ✅        |
 | 3    | G3 + G4       | Docker 沙箱 + 权限比对；完整的 L0–L4                 | ⬜ 规划中 |
-| 4    | 多语言 + 套件 | JS/TS、Go、Rust；套件已提前实现                      | 🔶        |
-| 5    | 自举 + 生态   | Repo2Skill 自我生成；注册中心对接                    | ⬜        |
+| 4    | 多语言 + 套件 | JS/TS、Go、Rust；套件功能完成（7/9）                 | 🔶        |
+| 5    | 自举 + 生态   | Repo2Skill 自我生成；注册中心对接                    | 🔶        |
 
 ---
 

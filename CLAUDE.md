@@ -16,7 +16,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 
-# Run all tests (62 tests across smoke + phase2)
+# Run all tests (110 tests across smoke + phase2)
 .venv/bin/python -m pytest tests/ -v
 
 # Run a single test
@@ -40,7 +40,7 @@ The project is **itself an Agent Skill**. The `repo2skill-skill/` directory is t
 
 **Core principle**: The Agent (Claude Code) does all LLM reasoning. Python scripts do only deterministic work. There are no API keys passed to Python files and no `llm_client.py` / `extractor_llm.py`.
 
-```
+```text
 repo2skill-skill/          ← Distributable Agent Skill
 ├── SKILL.md               ← Teaches the Agent the full workflow
 ├── skill.yaml             ← Repo2Skill's own metadata
@@ -66,7 +66,7 @@ src/repo2skill/            ← Python package
 
 ## Pipeline Flow
 
-```
+```text
 [source repo]
     │
     ▼
@@ -109,10 +109,10 @@ structure.py ───► analysis.json ───► Agent (Extractor)
 
 ## Testing
 
-62 tests, all passing. Two test directories:
+110 tests, all passing. Two test directories:
 
 - **`tests/smoke/`** (8 tests) — Phase 1 smoke tests. Use `create_sample_repo()` helper to create tiny test repos. Must always pass.
-- **`tests/phase2/`** (54 tests) — Phase 2 tests covering models, G1 scan, suite detection/DAG, CLI E2E, G2 score round-trip. Use both library-level and subprocess-based CLI tests. All mock-driven; no real external API calls.
+- **`tests/phase2/`** (102 tests) — Phase 2 + bootstrap + paper-inspired tests covering models, G1 scan, suite detection/DAG, CLI E2E, G2 score round-trip, bootstrap self-analysis, multi-trigger, skill overlap detection. Use both library-level and subprocess-based CLI tests. All mock-driven; no real external API calls.
 
 Key test helpers: `create_sample_repo()` in `tests/smoke/test_phase1.py` and `create_multi_module_repo()` in `tests/phase2/test_cli_phase2.py`.
 

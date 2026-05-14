@@ -49,7 +49,7 @@ workflow
 
 3. **Extract (Agent refinement)**: Read `analysis.json` and `candidates.json`. Act as the Extractor by following the five-step procedure in `references/extractor-guide.md` — filter, merge, score, enrich — and select the top 1–5 candidates.
 
-4. **Present candidates** to the user. In interactive mode, let the user choose which to generate. In non-interactive mode, auto-select candidates whose final confidence exceeds the threshold (default 0.8).
+4. **Present candidates** to the user. In interactive mode, let the user choose which to generate. In non-interactive mode, auto-select candidates whose final confidence exceeds the threshold (default 0.5).
 
 5. **Detect suite mode** before assembling. Apply the 4 criteria in `references/suite-mode.md`. If any criterion is met, propose suite mode and validate that inter-skill relations form a DAG.
 

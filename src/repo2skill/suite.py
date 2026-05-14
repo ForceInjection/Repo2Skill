@@ -88,7 +88,7 @@ def _estimate_combined_tokens(candidates: list[Skill] | list[SkillCandidate]) ->
             c.description
             + " ".join(c.policy.steps)
             + " ".join(c.policy.dependencies)
-            + c.conditions.trigger
+            + " ".join(c.conditions.triggers)
             + " ".join(c.conditions.preconditions)
         )
         total += len(text) // 4  # ~4 chars per token
@@ -212,6 +212,33 @@ def infer_relations(
                         {"source": c1.id, "target": c2.id, "type": "composes"}
                     )
 
+    # Infer composes from shared importer (orchestrator pattern).
+    # When a single module imports ≥3 candidates, those candidates are part
+    # of the same pipeline — infer composes between them.
+    importer_to_candidates: dict[str, set[str]] = {}
+    for edge in edges:
+        src_mod = edge.get("source", "")
+        tgt_mod = edge.get("target", "")
+        tgt_skill = _find_skill_for_module(candidates, tgt_mod)
+        if tgt_skill and src_mod != tgt_mod:
+            importer_to_candidates.setdefault(src_mod, set()).add(tgt_skill)
+
+    for importer, imported_skills in importer_to_candidates.items():
+        if len(imported_skills) < 3:
+            continue
+        skill_list = sorted(imported_skills)
+        for i, s1 in enumerate(skill_list):
+            for s2 in skill_list[i + 1:]:
+                already_exists = any(
+                    (r["source"] == s1 and r["target"] == s2)
+                    or (r["source"] == s2 and r["target"] == s1)
+                    for r in relations
+                )
+                if not already_exists:
+                    relations.append(
+                        {"source": s1, "target": s2, "type": "composes"}
+                    )
+
     # Infer bundled-with: same allowed-tools and same policy type
     for i, c1 in enumerate(candidates):
         for c2 in candidates[i + 1 :]:
@@ -238,23 +265,162 @@ def _find_skill_for_module(
 ) -> str | None:
     """Find the skill ID that corresponds to a given module name.
 
-    Uses exact match first, then prefix match against module boundaries.
-    """
-    # First pass: exact match on the module portion of entry
-    for c in candidates:
-        entry = c.policy.entry
-        if entry:
-            entry_module = entry.split(".")[0]
-            if entry_module == module:
-                return c.id
+    Handles the common naming mismatch where dependency-graph edges use
+    Python package names (``repo2skill.structure``) but skill entries use
+    file-path names (``src.repo2skill.structure.analyze_repo``).
 
-    # Second pass: prefix match (e.g., "module.sub" matching "module.sub.func")
+    Tries three matching strategies in order:
+      1. Entry starts with ``module.`` (exact prefix).
+      2. Entry starts with ``src.module.`` (``src/`` prefix variant).
+      3. Entry's module prefix equals the module name (segment-level match).
+    """
     for c in candidates:
         entry = c.policy.entry
-        if entry and entry.startswith(module + "."):
+        if not entry:
+            continue
+        # Strategy 1: direct prefix match
+        if entry.startswith(module + "."):
+            return c.id
+        # Strategy 2: src/-prefixed variant (file-path → package-name)
+        if entry.startswith(f"src.{module}.") or entry.startswith(f"tests.{module}."):
             return c.id
 
+    # Strategy 3: segment-level match — compare the entry's module prefix
+    # (everything up to the last dot) against the given module name, with
+    # and without the ``src.`` / ``tests.`` prefix.
+    for c in candidates:
+        entry = c.policy.entry
+        if not entry:
+            continue
+        # Get the module prefix (everything before the function name)
+        parts = entry.rsplit(".", 1)
+        if len(parts) < 2:
+            continue
+        entry_module = parts[0]
+        if entry_module == module:
+            return c.id
+        # Strip common prefixes and compare again
+        for prefix in ("src.", "tests."):
+            if entry_module.startswith(prefix) and entry_module[len(prefix):] == module:
+                return c.id
+            if module.startswith(prefix) and module[len(prefix):] == entry_module:
+                return c.id
+
     return None
+
+
+def detect_skill_overlap(
+    candidates: list[Skill] | list[SkillCandidate],
+    threshold: float = 0.5,
+) -> list[dict]:
+    """Detect potentially overlapping or redundant skills in a suite.
+
+    Uses Jaccard similarity on the combined set of steps, dependencies,
+    and file patterns. Pairs with similarity above *threshold* are flagged
+    for human review. This implements the paper's (§8.3) SkillNet concept
+    of automated detection of redundant or overlapping skills.
+
+    Args:
+        candidates: Skills to compare.
+        threshold: Jaccard similarity threshold (0.0–1.0).
+
+    Returns:
+        List of dicts with ``skill_a``, ``skill_b``, ``similarity``, and
+        ``overlapping_terms`` (the shared tokens).
+    """
+    overlaps: list[dict] = []
+
+    # Build token sets for each skill
+    token_sets: dict[str, set[str]] = {}
+    for c in candidates:
+        tokens: set[str] = set()
+        for step in c.policy.steps:
+            tokens.update(step.lower().split())
+        for dep in c.policy.dependencies:
+            tokens.add(dep.lower())
+        for fp in c.conditions.file_patterns:
+            tokens.add(fp.lower())
+        # Also include trigger words
+        for trigger in c.conditions.triggers:
+            tokens.update(trigger.lower().split())
+        token_sets[c.id] = tokens
+
+    ids = sorted(token_sets.keys())
+    for i, id1 in enumerate(ids):
+        for id2 in ids[i + 1:]:
+            s1 = token_sets[id1]
+            s2 = token_sets[id2]
+            if not s1 or not s2:
+                continue
+            intersection = s1 & s2
+            union = s1 | s2
+            similarity = len(intersection) / len(union) if union else 0.0
+
+            if similarity >= threshold:
+                # Find the two skill objects by ID for readable names
+                name_a = next((c.name for c in candidates if c.id == id1), id1)
+                name_b = next((c.name for c in candidates if c.id == id2), id2)
+                overlaps.append({
+                    "skill_a": id1,
+                    "skill_b": id2,
+                    "name_a": name_a,
+                    "name_b": name_b,
+                    "similarity": round(similarity, 2),
+                    "overlapping_terms": sorted(intersection)[:10],
+                })
+
+    return overlaps
+
+
+def compute_suite_trust_level(
+    member_trust_levels: dict[str, str],
+    relations: list[dict],
+) -> tuple[str, str]:
+    """Compute the suite-level trust level from member levels and relation graph.
+
+    Rule (design.md §2.5, P4-T8):
+      1. Base = min(member trust levels), numeric comparison.
+      2. Downgrade by 1 if the relation graph is incomplete — fewer than
+         (N-1) directional edges (depends-on + requires-output-from) among
+         N skills, since a complete pipeline should have at least a chain.
+
+    Args:
+        member_trust_levels: skill_id → "L0" | "L1" | "L2".
+        relations: List of relation dicts with "type", "source", "target".
+
+    Returns:
+        (level, reason) tuple.
+    """
+    _LEVEL_NUM = {"L0": 0, "L1": 1, "L2": 2}
+    _NUM_LEVEL = {0: "L0", 1: "L1", 2: "L2"}
+
+    if not member_trust_levels:
+        return "L0", "No member skills"
+
+    # Step 1: min member level
+    min_num = min(_LEVEL_NUM.get(lv, 0) for lv in member_trust_levels.values())
+    reason = f"Min member trust level = {_NUM_LEVEL[min_num]}"
+
+    # Step 2: relation-completeness penalty
+    n = len(member_trust_levels)
+    directional = [r for r in relations
+                   if r["type"] in ("depends-on", "requires-output-from")]
+    directional_count = len(directional)
+
+    if n > 1 and directional_count < (n - 1):
+        if min_num > 0:
+            min_num -= 1
+            reason += (
+                f"; downgraded to {_NUM_LEVEL[min_num]} "
+                f"(only {directional_count} directional edges for {n} skills, "
+                f"need ≥{n - 1})"
+            )
+        else:
+            reason += (
+                f" (only {directional_count} directional edges for {n} skills)"
+            )
+
+    return _NUM_LEVEL[min_num], reason
 
 
 def validate_dag(relations: list[dict]) -> tuple[bool, str]:

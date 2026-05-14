@@ -524,9 +524,40 @@ def _prefill_conditions(fi: _FuncInfo, imports: dict[str, set[str]]) -> Conditio
     """Heuristically fill Conditions from function info."""
     c = Conditions()
 
-    # Trigger: first line of docstring
+    # Triggers: extract multiple pattern-matching phrases from docstring.
+    # Each phrase becomes a trigger pattern the Agent can match against.
+    triggers: list[str] = []
     if fi.docstring:
-        c.trigger = fi.docstring.splitlines()[0].strip()
+        lines = fi.docstring.splitlines()
+        # First line is the primary trigger (summary)
+        first = lines[0].strip()
+        if first:
+            triggers.append(first)
+        # Extract additional triggers from key phrases in the docstring
+        for line in lines[1:]:
+            stripped = line.strip()
+            # Commands, verbs, CLI invocations, and domain terms
+            if any(kw in stripped.lower() for kw in (
+                "trigger", "use when", "invoke", "command", "run",
+            )):
+                # Extract the meaningful part after the keyword
+                for kw in ("trigger:", "use when:", "invoke:", "command:"):
+                    if kw in stripped.lower():
+                        phrase = stripped.lower().split(kw, 1)[-1].strip().rstrip(".")
+                        if phrase and len(phrase) > 5:
+                            triggers.append(phrase)
+                        break
+
+    # CLI entry decorators → add CLI invocation pattern
+    cli_decorators = {"click", "typer", "app", "cli", "command"}
+    for dec in fi.decorators:
+        if dec.lower() in cli_decorators or dec.lower().endswith("command"):
+            triggers.append(f"CLI invocation: {fi.qualname}")
+            break
+
+    # Deduplicate while preserving order
+    seen = set()
+    c.triggers = [t for t in triggers if not (t in seen or seen.add(t))]
 
     # Preconditions: inferred from dependencies (deduplicated by top-level package)
     seen_pkgs = set()
@@ -541,14 +572,6 @@ def _prefill_conditions(fi: _FuncInfo, imports: dict[str, set[str]]) -> Conditio
         if "path" in arg.lower() or "file" in arg.lower() or "dir" in arg.lower():
             if "str" in arg:
                 c.file_patterns.append("*.py")
-
-    # CLI entry decorators
-    cli_decorators = {"click", "typer", "app", "cli", "command"}
-    for dec in fi.decorators:
-        if dec.lower() in cli_decorators or dec.lower().endswith("command"):
-            if not c.trigger:
-                c.trigger = f"CLI invocation: {fi.qualname}"
-            break
 
     return c
 
@@ -765,8 +788,8 @@ def analyze_repo(source: str) -> AnalysisResult:
                 combined_imports["internal"].update(imps.get("internal", set()))
                 combined_imports["external"].update(imps.get("external", set()))
 
-        # Use the first significant function as the primary
-        primary = funcs[0] if funcs else None
+        # Select the best representative function for this module
+        primary = _select_primary_function(funcs)
         if primary is None:
             continue
 
@@ -798,6 +821,36 @@ def analyze_repo(source: str) -> AnalysisResult:
         dependency_graph=dep_graph,
         readme_summary=readme_summary,
     )
+
+
+def _select_primary_function(funcs: list[_FuncInfo]) -> _FuncInfo | None:
+    """Select the best representative function from a module.
+
+    Heuristics (in priority order):
+      1. Functions with has_main_block (called from ``if __name__ == "__main__"``).
+      2. Functions without underscore prefix (public API, not internal helpers).
+      3. Functions with the largest AST node count (more logic → more important).
+
+    The goal is to avoid picking internal helpers like ``_setup_logging``
+    when the real entry point is ``app`` or ``main``.
+    """
+    if not funcs:
+        return None
+    if len(funcs) == 1:
+        return funcs[0]
+
+    # Priority 1: has_main_block
+    main_funcs = [f for f in funcs if f.has_main_block]
+    if main_funcs:
+        return max(main_funcs, key=lambda f: f.ast_node_count)
+
+    # Priority 2: public (no underscore prefix)
+    public = [f for f in funcs if not f.name.startswith("_")]
+    if public:
+        return max(public, key=lambda f: f.ast_node_count)
+
+    # Priority 3: largest by AST size
+    return max(funcs, key=lambda f: f.ast_node_count)
 
 
 def _derive_skill_name(module: str, fi: _FuncInfo | None) -> str:

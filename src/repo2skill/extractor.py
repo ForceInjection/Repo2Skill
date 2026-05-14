@@ -40,7 +40,7 @@ def extract_skills(result: AnalysisResult) -> list[Skill]:
     # Log scores for debugging
     for total, skill, scores in top:
         logger.info(
-            "Skill %s: total=%.2f rec=%.2f ver=%.2f nob=%.2f gen=%.2f",
+            "Skill %s: total=%.2f rec=%.2f ver=%.2f nob=%.2f gen=%.2f cen=%.2f com=%.2f",
             skill.id,
             total,
             *scores,
@@ -70,22 +70,24 @@ def extract_skills_with_scores(result: AnalysisResult) -> list[SkillCandidate]:
     top = scored[:MAX_CANDIDATES]
 
     candidates = []
-    for total, skill, (rec, ver, nob, gen) in top:
-        # Normalize total (0–4 range) to confidence (0.0–1.0)
-        confidence = min(total / 4.0, 1.0)
+    for total, skill, (rec, ver, nob, gen, cen, com) in top:
+        # Normalize total (0–6 range) to confidence (0.0–1.0)
+        confidence = min(total / 6.0, 1.0)
 
         # Build human-readable reasoning
         reasoning_parts = []
         if rec >= 0.7:
             reasoning_parts.append("rare pattern (high specialization value)")
-        elif rec <= 0.3:
-            reasoning_parts.append("common pattern")
         if ver >= 0.7:
             reasoning_parts.append("well-documented")
         if nob >= 0.5:
             reasoning_parts.append("high complexity (non-obvious)")
         if gen >= 0.5:
             reasoning_parts.append("highly reusable/parameterized")
+        if cen >= 0.5:
+            reasoning_parts.append("central (imported by many modules)")
+        if com >= 0.7:
+            reasoning_parts.append("comprehensively documented (high coverage)")
 
         candidate = SkillCandidate(
             id=skill.id,
@@ -102,6 +104,8 @@ def extract_skills_with_scores(result: AnalysisResult) -> list[SkillCandidate]:
                 "verification": round(ver, 2),
                 "non_obviousness": round(nob, 2),
                 "generalizability": round(gen, 2),
+                "centrality": round(cen, 2),
+                "completeness": round(com, 2),
                 "total": round(total, 2),
             },
         )
@@ -111,14 +115,20 @@ def extract_skills_with_scores(result: AnalysisResult) -> list[SkillCandidate]:
 
 
 def _score_skill(skill: Skill, result: AnalysisResult) -> tuple[float, Skill, tuple[float, ...]]:
-    """Score a skill by four criteria. Returns (total, skill, (rec, ver, nob, gen))."""
+    """Score a skill by six criteria. Returns (total, skill, (rec, ver, nob, gen, cen, com))."""
     rec = _score_recurrence(skill, result)
     ver = _score_verification(skill)
     nob = _score_non_obviousness(skill)
     gen = _score_generalizability(skill)
+    cen = _score_centrality(skill, result)
+    com = _score_completeness(skill)
 
-    total = rec + ver + nob + gen
-    return (total, skill, (rec, ver, nob, gen))
+    # Test-file penalty: multiply total by 0.7 for modules under tests/
+    total = rec + ver + nob + gen + cen + com
+    if _is_test_module(skill):
+        total *= 0.7
+
+    return (total, skill, (rec, ver, nob, gen, cen, com))
 
 
 def _score_recurrence(skill: Skill, result: AnalysisResult) -> float:
@@ -145,22 +155,29 @@ def _score_recurrence(skill: Skill, result: AnalysisResult) -> float:
 def _score_verification(skill: Skill) -> float:
     """Score 0.0–1.0 based on documentation and type hint coverage.
 
-    - Has docstring/trigger: +0.3
+    - Has docstring/trigger: +0.15 (reduced from 0.3 to avoid docstring-length bias)
     - Has file_patterns: +0.2
-    - Has steps defined: +0.3
+    - Has meaningful steps (>1): +0.3
     - Has params with type hints: +0.2
+    - Penalty if steps are just template "Use X()" patterns: −0.15
     """
     score = 0.0
 
-    if skill.conditions.trigger:
-        score += 0.3
+    if skill.conditions.triggers:
+        score += 0.15
 
     if skill.conditions.file_patterns:
         score += 0.2
 
-    if skill.policy.steps and len(skill.policy.steps) > 1:
-        score += 0.3
-    elif skill.policy.steps:
+    steps = skill.policy.steps
+    if steps and len(steps) > 1:
+        # Penalize template "Use func()" steps — they carry no real information
+        template_count = sum(1 for s in steps if s.startswith("Use ") and s.endswith("()"))
+        if template_count >= len(steps) * 0.7:
+            score += 0.15  # Reduced: mostly template steps
+        else:
+            score += 0.3   # Full credit: meaningful steps
+    elif steps:
         score += 0.15
 
     typed_params = sum(1 for v in skill.interface.params.values() if v)
@@ -225,5 +242,101 @@ def _score_generalizability(skill: Skill) -> float:
         score += 0.3
     elif skill.policy.type == "workflow":
         score += 0.2
+
+    return min(score, 1.0)
+
+
+def _score_centrality(skill: Skill, result: AnalysisResult) -> float:
+    """Score 0.0–1.0 based on how many other modules import this module.
+
+    A module imported by many others is a core dependency — its skill is more
+    valuable to document. Modules with 0 incoming edges (leaf nodes) get 0.0.
+    The score is normalized against the max in-degree in the graph.
+    """
+    dep_graph = result.dependency_graph
+    if not dep_graph or not dep_graph.get("edges"):
+        return 0.0
+
+    entry = skill.policy.entry
+    if not entry:
+        return 0.0
+
+    # Extract the module prefix from the entry (everything before last dot)
+    entry_module = entry.rsplit(".", 1)[0] if "." in entry else entry
+
+    # Candidate node names to match (both file-path and package naming conventions)
+    candidates = {entry_module}
+    for prefix in ("src.", "tests."):
+        if entry_module.startswith(prefix):
+            candidates.add(entry_module[len(prefix):])
+        else:
+            candidates.add(f"{prefix}{entry_module}")
+
+    # Count incoming edges (other→this module)
+    in_degree = 0
+    max_in_degree = 1
+    in_degrees: dict[str, int] = {}
+    for edge in dep_graph.get("edges", []):
+        tgt = edge.get("target", "")
+        in_degrees[tgt] = in_degrees.get(tgt, 0) + 1
+        if tgt in candidates:
+            in_degree += 1
+        max_in_degree = max(max_in_degree, in_degrees.get(tgt, 0))
+
+    if max_in_degree <= 1:
+        return 0.5 if in_degree > 0 else 0.0
+
+    return min(in_degree / max_in_degree, 1.0)
+
+
+def _is_test_module(skill: Skill) -> bool:
+    """Check if a skill comes from a test module.
+
+    Test modules typically start with 'tests.' or contain '.test_' or
+    end with '_test'. The entry point path reveals the module origin.
+    """
+    entry = skill.policy.entry.lower()
+    return (
+        entry.startswith("tests.")
+        or ".test_" in entry
+        or entry.endswith("_test")
+    )
+
+
+def _score_completeness(skill: Skill) -> float:
+    """Score 0.0–1.0 based on documentation completeness (feature coverage).
+
+    Measures how thoroughly the skill is documented across all four-tuple
+    dimensions (paper §7 "Completeness / Feature Coverage"):
+
+    - Parameter type coverage: typed_params / total_params (0.0–0.3)
+    - Trigger/documentation coverage: has triggers + docstring (0.0–0.3)
+    - Termination criteria defined (0.0–0.2)
+    - Steps beyond template "Use X()" patterns (0.0–0.2)
+    """
+    score = 0.0
+
+    # Parameter type coverage
+    total_params = len(skill.interface.params)
+    if total_params > 0:
+        typed = sum(1 for v in skill.interface.params.values() if v)
+        score += 0.3 * (typed / total_params)
+
+    # Trigger and docstring coverage
+    if skill.conditions.triggers:
+        score += 0.15
+    if skill.description:
+        score += 0.15
+
+    # Termination criteria
+    if skill.termination.success:
+        score += 0.2
+
+    # Meaningful steps (not just "Use X()" templates)
+    steps = skill.policy.steps
+    if steps:
+        meaningful = sum(1 for s in steps
+                        if not (s.startswith("Use ") and s.endswith("()")))
+        score += 0.2 * min(meaningful / max(len(steps), 1), 1.0)
 
     return min(score, 1.0)

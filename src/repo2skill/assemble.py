@@ -83,7 +83,7 @@ def assemble_skill(
         "dependencies": skill.policy.dependencies,
         "allowed_tools": skill.interface.allowed_tools,
         "ontology_relations": rels,
-        "conditions_trigger": skill.conditions.trigger or "No trigger defined",
+        "conditions_triggers": skill.conditions.triggers or ["No trigger defined"],
         "preconditions": skill.conditions.preconditions,
         "file_patterns": skill.conditions.file_patterns,
         "policy_type": skill.policy.type or "function",

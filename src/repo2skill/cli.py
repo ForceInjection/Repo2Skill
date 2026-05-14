@@ -20,6 +20,7 @@ from repo2skill.reviewer.g1 import run_g1_scan
 from repo2skill.structure import analyze_repo
 from repo2skill.suite import (
     assemble_suite,
+    compute_suite_trust_level,
     detect_suite_mode,
     infer_relations,
     validate_dag,
@@ -73,7 +74,7 @@ def main(
         help="Output mode: single, suite, or auto (detect from repo structure)",
     ),
     confidence_threshold: float = typer.Option(
-        0.8,
+        0.5,
         "--confidence-threshold",
         help="Minimum confidence for auto-selection in non-interactive mode",
     ),
@@ -223,8 +224,20 @@ def main(
     # Step 7: Compute trust level and update assembled skill.yaml
     # =========================================================================
     trust_level = "L1" if all_g1_passed else "L0"
-    typer.echo(f"\nInitial trust level: {trust_level}")
-    _update_skill_yaml_trust(skill_dirs, trust_level, all_g1_passed)
+
+    if use_suite and len(selected) > 1:
+        # Suite mode: per-member trust + relation completeness penalty
+        member_levels = _compute_member_trust_levels(selected, all_g1_passed)
+        suite_level, reason = compute_suite_trust_level(
+            member_levels, _get_suite_relations(skill_dirs)
+        )
+        trust_level = suite_level
+        typer.echo(f"\nSuite trust level: {trust_level} ({reason})")
+        _update_suite_yaml_trust(skill_dirs, suite_level, member_levels)
+    else:
+        typer.echo(f"\nInitial trust level: {trust_level}")
+        _update_skill_yaml_trust(skill_dirs, trust_level, all_g1_passed)
+
     typer.echo(
         "For G2 semantic review, have the Agent (Claude Code) follow"
         " the G2 instructions in SKILL.md."
@@ -368,6 +381,77 @@ def _update_skill_yaml_trust(
                 )
             except Exception:
                 pass  # Non-critical; trust level is reported to user regardless
+
+
+def _compute_member_trust_levels(
+    selected: list, all_g1_passed: bool
+) -> dict[str, str]:
+    """Compute per-skill trust level from suite-level G1 result.
+
+    For suite mode, G1 scans the entire suite directory and produces a single
+    report. All members inherit the same G1 result until per-skill G1 is
+    implemented (Phase 3).
+    """
+    base = "L1" if all_g1_passed else "L0"
+    member_levels: dict[str, str] = {}
+    for s in selected:
+        sid = s.id if hasattr(s, "id") else s.get("id", "")
+        member_levels[sid] = base
+    return member_levels
+
+
+def _get_suite_relations(skill_dirs: list[Path]) -> list[dict]:
+    """Read suite.yaml relations from the first suite directory found."""
+    import yaml
+
+    for skill_dir in skill_dirs:
+        suite_yaml = skill_dir / "suite.yaml"
+        if suite_yaml.exists():
+            data = yaml.safe_load(suite_yaml.read_text(encoding="utf-8")) or {}
+            return data.get("relations", [])
+    return []
+
+
+def _update_suite_yaml_trust(
+    skill_dirs: list[Path],
+    suite_level: str,
+    member_levels: dict[str, str],
+) -> None:
+    """Update suite.yaml and sub-skill skill.yaml files with computed trust levels."""
+    import yaml
+
+    for skill_dir in skill_dirs:
+        # Update suite.yaml
+        suite_yaml = skill_dir / "suite.yaml"
+        if suite_yaml.exists():
+            data = yaml.safe_load(suite_yaml.read_text(encoding="utf-8")) or {}
+            data["trust-level"] = suite_level
+            suite_yaml.write_text(
+                yaml.dump(data, default_flow_style=False, allow_unicode=True),
+                encoding="utf-8",
+            )
+
+        # Update per-sub-skill skill.yaml files
+        for yaml_path in skill_dir.rglob("skill.yaml"):
+            try:
+                data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+                # Match yaml path to a member by scanning for skill ID in path
+                matched_level = None
+                for sid, level in member_levels.items():
+                    if sid in str(yaml_path.parent):
+                        matched_level = level
+                        break
+                if matched_level is None:
+                    matched_level = suite_level
+                data["trust-level"] = matched_level
+                if "security" in data and isinstance(data["security"], dict):
+                    data["security"]["g1-passed"] = matched_level != "L0"
+                yaml_path.write_text(
+                    yaml.dump(data, default_flow_style=False, allow_unicode=True),
+                    encoding="utf-8",
+                )
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

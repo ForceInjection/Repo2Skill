@@ -20,9 +20,15 @@ trust-level: {{ trust_level }}
 
 ## Conditions
 
-### Trigger
+### Triggers
 
-{{ conditions_trigger }}
+{%- if conditions_triggers -%}
+{%- for trigger in conditions_triggers %}
+- "{{ trigger }}"
+{%- endfor -%}
+{%- else %}
+- _No triggers defined._
+{%- endif %}
 
 ### Preconditions
 

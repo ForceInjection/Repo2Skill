@@ -49,6 +49,17 @@ DANGEROUS_PATTERNS: list[tuple[str, str, str]] = [
     # Dynamic imports
     (r"\bimportlib\.import_module\s*\(", "importlib.import_module() — dynamic import", "medium"),
     (r"\b__import__\s*\(", "__import__() — dynamic import", "medium"),
+    # Hardcoded paths — repository-specific, not portable (paper §3.3.3)
+    (r"/(?:home|Users|tmp|var|etc|opt|usr)/", "hardcoded absolute path — not portable", "medium"),
+    (r"[A-Za-z]:[/\\]", "hardcoded Windows drive-letter path — not portable", "medium"),
+    # Suspicious secret-like variable assignments (paper §7)
+    (r"(?i)(api[_-]?key|secret|token|password|passwd)\s*=\s*\"[^\"]{20,}\"",
+     "variable named like a secret with a long string value — potential embedded credential", "high"),
+    (r"(?i)(api[_-]?key|secret|token|password|passwd)\s*=\s*'[^']{20,}'",
+     "variable named like a secret with a long string value — potential embedded credential", "high"),
+    # Environment variable access with secret-like keys (paper §7, G4)
+    (r"""(?i)os\.(?:environ|getenv)\s*\(\s*['\"]\s*.*(?:key|secret|token|password|pass)""",
+     "env var read with secret-like key name", "low"),
 ]
 
 

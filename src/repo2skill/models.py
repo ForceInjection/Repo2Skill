@@ -6,9 +6,14 @@ from pydantic import BaseModel, Field
 class Conditions(BaseModel):
     """C — Applicable conditions and trigger scenarios."""
 
-    trigger: str = ""
+    triggers: list[str] = Field(default_factory=list)
     preconditions: list[str] = Field(default_factory=list)
     file_patterns: list[str] = Field(default_factory=list)
+
+    @property
+    def trigger(self) -> str:
+        """Backward-compat: return the first trigger pattern, or empty string."""
+        return self.triggers[0] if self.triggers else ""
 
 
 class Policy(BaseModel):

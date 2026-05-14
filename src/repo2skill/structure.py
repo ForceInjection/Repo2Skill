@@ -657,26 +657,6 @@ def _prefill_interface(fi: _FuncInfo) -> Interface:
     return iface
 
 
-_EXEC_IMPORTS = {"subprocess", "os", "commands"}
-_NETWORK_IMPORTS = {"socket", "requests", "urllib", "http.client", "httpx"}
-
-
-def _enrich_allowed_tools(skill: Skill, combined_imports: dict[str, set[str]]) -> None:
-    """Enrich allowed_tools based on module-level import patterns."""
-    tools = set(skill.interface.allowed_tools)
-    external = combined_imports.get("external", set())
-
-    for imp in external:
-        top = imp.split(".")[0]
-        if top in _EXEC_IMPORTS:
-            tools.add("Bash")
-        if top in _NETWORK_IMPORTS:
-            tools.add("Bash")
-
-    if tools:
-        skill.interface.allowed_tools = sorted(tools)
-
-
 # ---------------------------------------------------------------------------
 # Dependency graph builder
 # ---------------------------------------------------------------------------
@@ -725,46 +705,6 @@ def _read_readme(root: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _is_skillable_module(module: str, funcs: list[_FuncInfo]) -> bool:
-    """Filter out modules that shouldn't become candidate skills.
-
-    Returns False for: test files, private modules, empty modules, modules
-    with only private/internal functions.
-    """
-    parts = module.split(".")
-
-    # Skip test directories
-    if any(p in ("tests", "test") or p.startswith("test_") for p in parts):
-        return False
-
-    # Skip private modules (e.g., _internal, __init__ only)
-    if parts and parts[-1].startswith("_"):
-        return False
-
-    # Skip modules with no public functions
-    public_funcs = [f for f in funcs if not f.name.startswith("_")]
-    if not public_funcs:
-        return False
-
-    # Skip thin CLI wrappers (scripts/ that just call main())
-    if "scripts" in parts and len(public_funcs) <= 1:
-        main_only = all(
-            f.name == "main" or f.name.startswith("_")
-            for f in funcs
-        )
-        if main_only:
-            return False
-
-    # Skip if the primary function is __init__ (constructors aren't
-    # standalone — classes are better represented by their public methods).
-    # Check funcs[0] (unfiltered), not public_funcs, because __init__
-    # starts with _ and is excluded from public_funcs.
-    if funcs and funcs[0].name == "__init__":
-        return False
-
-    return True
-
-
 def analyze_repo(source: str) -> AnalysisResult:
     """Analyze a repository and produce an AnalysisResult with four-tuple annotations.
 
@@ -809,14 +749,12 @@ def analyze_repo(source: str) -> AnalysisResult:
     for fi in all_funcs:
         funcs_by_module.setdefault(fi.module, []).append(fi)
 
-    # Pre-fill four-tuple for each module and create Skill objects
+    # Pre-fill four-tuple for each module and create Skill objects.
+    # No filtering or quality judgment here — that's the Agent's job.
+    # The Agent reads the full list and decides which ones are teachable skills.
     skills: list[Skill] = []
     skill_id = 0
     for mod, funcs in sorted(funcs_by_module.items()):
-        # Pre-filter: skip modules that aren't useful as skills
-        if not _is_skillable_module(mod, funcs):
-            continue
-
         skill_id += 1
 
         # Combine imports across all files in this module
@@ -846,9 +784,6 @@ def analyze_repo(source: str) -> AnalysisResult:
         for fi in funcs:
             if fi.qualname != primary.qualname:
                 skill.policy.steps.append(f"Use {fi.qualname}()")
-
-        # Enrich allowed_tools from import patterns
-        _enrich_allowed_tools(skill, combined_imports)
 
         skills.append(skill)
 

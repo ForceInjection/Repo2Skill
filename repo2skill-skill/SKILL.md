@@ -117,107 +117,89 @@ A valid Agent Skill directory (or Skill Suite) is produced with:
 
 ---
 
-## Extractor: Screening Criteria
+## Extractor: Five-Step Extraction
 
-When acting as the Extractor, start from the rule-based scores in `candidates.json`, then apply these 4 criteria to refine them:
+The structurer (`structure.py`) produces **raw function data** in `analysis.json` — no filtering, no quality judgments, no tool inference. The rule-based `extract.py` produces `candidates.json` with baseline scores as **hints only**.
 
-### 1. Recurrence (0.0–1.0)
+**Your job as Extractor**: Read the raw data from `analysis.json` (all functions, dependency graph, readme summary), use `candidates.json` scores as hints, then make all quality decisions yourself.
 
-How unique is this pattern within the repo? Rare patterns are more valuable to document.
+### Step A: Read Everything
 
-- Check `dependency_graph` for modules with similar structures
-- `__init__` methods are common across classes — don't overvalue them
-- Functions that are the ONLY way to do something in the repo score higher
-
-### 2. Verification (0.0–1.0)
-
-How well-documented?
-
-- Check `conditions.trigger` (prefilled from docstring first line)
-- Check `interface.params` for type annotations (empty string values = no type hint)
-- Check `policy.steps` count and specificity
-
-### 3. Non-obviousness (0.0–1.0)
-
-How complex is the code? Higher complexity = higher documentation value.
-
-- Evaluate `policy.steps` count (26 steps is extreme; 1–2 is trivial)
-- Evaluate `policy.dependencies` breadth
-- Evaluate `conditions.preconditions` specificity
-
-### 4. Generalizability (0.0–1.0)
-
-How reusable across contexts?
-
-- More parameters in `interface.params` (but discount `self`)
-- Broader `conditions.file_patterns` (e.g., `["*.py", "*.md"]` > `["*.py"]`)
-- "function" type scores higher than "script" type for reuse
-
-### Combining Criteria into Confidence
-
-Default: use the rule-based confidence from `candidates.json` (computed as the average of the four normalized scores).
-
-When overriding, assign each criterion a 0.0–1.0 score based on the guidance above, then compute:
-
-```text
-confidence = (recurrence + verification + non_obviousness + generalizability) / 4
+```
+Read analysis.json → all skills (full list, not just top 5)
+Read candidates.json → rule-based scores (hints, not decisions)
+Read readme_summary → repo-level intent and purpose
+Skim dependency_graph → which modules call each other
 ```
 
-Adjust up or down by up to 0.1 based on qualitative judgment (e.g., a skill being the sole entry point to a critical subsystem deserves a boost). Always provide `reasoning` explaining any override from the rule-based baseline.
+### Step B: Filter
 
-### Scoring Adjustments
+Scan every function in `analysis.json.skills[]` and skip those that aren't teachable skills:
 
-Apply these modifiers to the baseline scores to correct for structurer biases:
+| Skip | Why |
+|------|-----|
+| Module path contains `/test/` or `/tests/` | Test helpers follow common patterns — not reusable skills |
+| Entry function is `__init__` | Class constructors are class-bound; the class's public methods are the real skills |
+| Entry function starts with `_` (private) | Private helpers have narrow scope — unless they're the ONLY function in the module |
+| All functions in the module are `_`-prefixed | No public interface to teach |
+| Only function is `main()` and it just calls another module | Thin wrappers — teach the underlying module instead |
 
-**Bonuses** (add to the criterion):
-| Condition | Criterion | Adjustment | Reason |
-|-----------|-----------|------------|--------|
-| CLI entry (in `pyproject.toml [project.scripts]` or has `if __name__ == "__main__"`) | Generalizability | +0.2 | CLI tools have clear invocation patterns |
-| High fan-in (referenced by 3+ other modules in `dependency_graph`) | Non-obviousness | +0.2 | Widely-used functions are infrastructure worth documenting |
-| Complete docstring (has Args + Returns + Raises sections) | Verification | +0.2 | Well-documented code produces richer skills |
+Keep everything else. You may end up with 20-50 candidates from a large repo. That's fine — you'll score and merge next.
 
-**Penalties** (subtract from the criterion):
-| Condition | Criterion | Adjustment | Reason |
-|-----------|-----------|------------|--------|
-| `__init__` method | Generalizability | -0.2 | Constructors are class-bound, not standalone |
-| Test function (module path contains `test/` or `tests/`) | Recurrence | -0.3 | Test helpers follow common patterns |
-| Private function (name starts with `_`) | Generalizability | -0.2 | Private functions have narrow reuse scope |
+### Step C: Merge
 
-### Workflow Merging (Granularity Fix)
+Merge related functions into workflow-level skills to avoid producing dozens of single-function skills:
 
-The structurer produces **function-level** candidates (one per module). To create useful skills, merge related functions into **workflow-level** skills:
+1. **Same-module**: If multiple functions from one module form a pipeline (A calls B, B calls C in the dependency graph), merge into one `"workflow"` skill. The top-level entry function is the primary.
 
-1. **Same-module merge**: If multiple candidates come from the same module, merge them into a single workflow skill. Use the most public function as the entry point, and list the others as sub-steps.
+2. **Cross-module call chains**: If function A in module X calls function B in module Y (visible in `dependency_graph` edges), and B is the sole public function of Y, merge B into A's skill. Trace up to 3 levels.
 
-2. **Call-chain merge**: Use `dependency_graph` edges to find functions that call each other. If function A calls B and B calls C, merge A+B+C into one skill with A as the entry. Trace up to 3 levels deep.
+3. **Do NOT merge**:
+   - Functions from `test_*` modules (these aren't skills)
+   - Functions with no callers AND no callees (leaf nodes) — unless they're CLI entries
+   - Functions from entirely different subsystems (e.g., don't merge a linter with a formatter)
 
-3. **Don't merge**: Keep the following as standalone (don't merge into core skills):
-   - Test helpers (from `test_*` modules)
-   - Utility scripts (from `scripts/` directories)
-   - Functions with no callers and no callees (leaf nodes with no edges)
+After merging, set the merged skill's `policy.type` to `"workflow"`.
 
-After merging:
-- Set `policy.type` to `"workflow"` (instead of `"function"` or `"script"`)
-- Set `policy.entry` to the top-level entry function
-- Write `policy.steps` as a sequence describing the merged workflow, not individual function calls
+### Step D: Score
 
-### Context Enrichment (Quality Fix)
+Apply the 4 criteria to each candidate (with modifiers), then rank:
 
-The structurer fills fields with raw docstrings. Enrich them using these sources:
+**Base criteria** (each 0.0–1.0):
 
-**description**: Combine in order of priority:
-1. `readme_summary` first paragraph (repo-level purpose)
-2. The entry function's full docstring (first paragraph only, not just the first line)
+| Criterion | What to evaluate |
+|-----------|-----------------|
+| **Recurrence** | How unique? Rare patterns = higher value. Check `dependency_graph` for similar structures. |
+| **Verification** | How well-documented? Type hints in `interface.params`, specificity of `policy.steps`, docstring in `conditions.trigger`. |
+| **Non-obviousness** | How complex? Step count, dependency breadth, precondition count. Higher complexity = more documentation value. |
+| **Generalizability** | How reusable? Parameter count (discount `self`), breadth of `conditions.file_patterns`, function vs script type. |
 
-**conditions.trigger**: Write as a user intent: "User asks to [purpose from description]"
+**Modifiers** (apply to the criterion score):
 
-**policy.steps**: Rewrite each step:
-- **Before**: `"Use module.func()"` (function reference)
-- **After**: Extract from `func()`'s docstring. If the docstring says "Parse all Python files via AST", write "Parse all Python files via AST". Drop the `"Use "` prefix. If no docstring, keep the function name but add context from surrounding code.
+| Condition | Criterion | Adj | Reason |
+|-----------|-----------|-----|--------|
+| CLI entry (`if __name__ == "__main__"` or in `pyproject.toml [project.scripts]`) | Generalizability | +0.2 | CLI tools have clear invocation |
+| High fan-in (3+ other modules reference it in `dependency_graph`) | Non-obviousness | +0.2 | Widely-used = infrastructure |
+| Complete docstring (Args + Returns + Raises) | Verification | +0.2 | Richer documentation |
+| `__init__` method | Generalizability | -0.2 | Constructor, not standalone |
+| Test function (module path contains `test/`) | Recurrence | -0.3 | Common test pattern |
+| Private function (`_` prefix) | Generalizability | -0.2 | Narrow reuse scope |
 
-**policy.dependencies**: Remove from the list:
-- `__future__` (compiler directive, not a runtime dependency)
-- Python stdlib modules (use `analysis.json`'s internal classification to identify)
+Confidence: `(recurrence + verification + non_obviousness + generalizability) / 4`, ±0.1 for qualitative judgment.
+
+### Step E: Enrich
+
+Before presenting, improve the quality of the top 1-5 candidates:
+
+**Name**: Use `readme_summary` for repo context. Prefer functional names like "Skill Extraction Pipeline" over "Src Repo2Skill Extractor - extract_skills".
+
+**Description**: Combine `readme_summary` first paragraph + the entry function's purpose.
+
+**Policy steps**: Rewrite `"Use module.func()"` references into natural language. Extract from each function's docstring first line. Drop the `"Use "` prefix.
+
+**Dependencies**: Remove `__future__` and Python stdlib from the list. Only keep packages that require `pip install`.
+
+**Allowed tools**: Infer from import patterns: `subprocess`/`os.system` → `Bash`, `open()`/`Path` → `Read`/`Write`, `requests`/`urllib` → network (flag for review).
 
 ### Candidate Presentation Format
 
@@ -225,7 +207,7 @@ The structurer fills fields with raw docstrings. Enrich them using these sources
 [skN] Skill Name (confidence: X.XX)
   Reasoning: <why this skill was selected, what makes it valuable>
   Entry: policy.entry
-  Type: policy.type
+  Type: policy.type (workflow if merged)
   Allowed Tools: [interface.allowed_tools]
 ```
 

@@ -48,10 +48,11 @@ def main() -> None:
     candidates_path.write_text(candidates_json, encoding="utf-8")
 
     print(f"Wrote {len(candidates)} candidate(s) to {candidates_path}")
-    print("\nThe Agent should now read candidates.json and apply the 4 screening")
-    print("criteria (Recurrence, Verification, Non-obviousness, Generalizability)")
-    print("to refine these baseline scores via LLM reasoning.")
-    print("\nCandidate summary:")
+    print("\nIMPORTANT: These are rule-based HINTS only.")
+    print("The Agent MUST read the FULL analysis.json (all functions, not just top 5)")
+    print("and independently filter, merge, score, and enrich candidates.")
+    print("See SKILL.md Extractor section (Steps A-E) for the complete workflow.")
+    print("\nCandidate summary (rule-based hints):")
     for c in candidates:
         print(f"  [{c.id}] {c.name} (confidence: {c.confidence:.2f}) — {c.reasoning}")
 

@@ -15,7 +15,9 @@ Repo2Skill 是一个 Agent Skill，它教会 Agent 如何将任意 Python 仓库
 
 ---
 
-## 安装
+## 安装（开发环境）
+
+面向贡献者：本地运行 CLI、跑测试、修改源码。
 
 ```bash
 # 克隆仓库
@@ -35,9 +37,83 @@ repo2skill --help
 
 ---
 
+## 部署到 Agent（生产使用）
+
+面向最终用户：将 Repo2Skill 作为一个 Agent Skill 安装到 Agent 运行时的技能目录（例如 Claude Code 的 `~/.claude/skills/`）。
+
+**为什么需要单独的部署步骤？** Agent 运行时从一个固定目录加载技能，技能目录必须自包含——`SKILL.md`、`scripts/`、`references/`，以及 scripts 所依赖的 `repo2skill` Python 包都要齐全。`pip install -e .` 只把包装到了开发环境的 `site-packages`，Agent 进程未必能访问到。`deploy.sh` 解决的就是把"骨架 + 脚本 + 包源码"一起搬到目标目录的问题。
+
+### 一键部署
+
+```bash
+# 克隆 Repo2Skill
+git clone <repo-url> repo2skill
+cd repo2skill
+
+# 部署技能目录（不装依赖）
+bash repo2skill-skill/deploy.sh ~/.claude/skills
+
+# 已存在则覆盖（升级时使用）
+bash repo2skill-skill/deploy.sh ~/.claude/skills --force
+
+# 自定义子目录名（默认 repo2skill）
+bash repo2skill-skill/deploy.sh ~/.claude/skills --skill-name my-r2s
+```
+
+### Python 依赖与虚拟环境
+
+**关键约束**：Agent 运行脚本时使用的是它自己进程 `PATH` 上的 `python3`，不会继承你 shell 里 `source venv/bin/activate` 的环境变量。因此必须把 `typer/pydantic/gitpython/jinja2/pyyaml` 装到 **Agent 实际调用的那个 Python** 里。
+
+`deploy.sh --install-deps` 会调用当前 shell 中的 `python3 -m pip install`，部署前用 `which python3` 确认路径与 Agent 一致。常见两种做法：
+
+**方案 A：为 Agent 准备专用虚拟环境（推荐）**：
+
+```bash
+python3 -m venv ~/.claude/skills/.venv
+source ~/.claude/skills/.venv/bin/activate     # 必需，让 deploy.sh 使用这个 Python
+bash repo2skill-skill/deploy.sh ~/.claude/skills --install-deps
+# 然后让 Agent 启动时使用该 venv，例如在启动脚本里设置：
+#   export PATH="$HOME/.claude/skills/.venv/bin:$PATH"
+```
+
+**方案 B：装到 Agent 已在使用的 Python（例如 Homebrew 的 `/opt/homebrew/bin/python3`）**
+
+```bash
+bash repo2skill-skill/deploy.sh ~/.claude/skills    # 先只拷贝文件
+python3 -m pip install --user typer pydantic gitpython jinja2 pyyaml
+# 若遇到 PEP 668 错误（externally-managed-environment），
+# 什么都不要加 --break-system-packages，改用方案 A 更安全。
+```
+
+> 不推荐直接装到系统 Python；PEP 668 会拦截，即使绕过也容易弄坏其他包依赖。
+
+### 部署后的目录结构
+
+```text
+<agent_skills_dir>/repo2skill/
+├── SKILL.md          # 技能入口（被 Agent 加载）
+├── skill.yaml        # 技能元数据
+├── scripts/          # CLI 包装脚本：structure / extract / assemble / audit_g1 / audit_g2
+├── references/       # 渐进式披露 Level 3 参考文档
+└── repo2skill/       # 内联打包的 Python 包（来自 src/repo2skill/）
+```
+
+scripts 内置 `sys.path` 引导，会优先使用同目录下内联的 `repo2skill/` 包，所以 **目标机器无需额外 `pip install -e .`**，只要 Python 环境里有 `typer/pydantic/gitpython/jinja2/pyyaml` 这五个依赖即可（`--install-deps` 会一次装齐）。
+
+### 升级
+
+```bash
+cd repo2skill && git pull
+bash repo2skill-skill/deploy.sh ~/.claude/skills --force
+```
+
+---
+
 ## 快速开始
 
-### 命令行模式
+### 开发模式（CLI）
+
+开发环境下直接调用 `repo2skill` 命令：
 
 ```bash
 # 最简单的用法：分析一个本地仓库，生成单个技能
@@ -61,14 +137,14 @@ repo2skill ./my-project --non-interactive --write-analysis -o ./output
 
 ### Agent 模式
 
-在 Agent 对话中直接使用：
+部署到 `<agent_skills_dir>/repo2skill/` 后，Agent 会自动加载 `SKILL.md`。在对话中直接说：
 
 > "把 `https://github.com/psf/black` 转换成 Agent Skill。"
 
-Agent 将加载 Repo2Skill，依次执行：
+Agent 将依次执行：
 
-1. 运行 `structure.py` 分析仓库结构
-2. 运行 `extract.py` 获取规则基线评分
+1. 运行 `scripts/structure.py` 分析仓库结构
+2. 运行 `scripts/extract.py` 获取规则基线评分
 3. Agent 自身作为 Extractor，应用 4 项筛选准则精炼候选技能
 4. 展示候选技能供你选择
 5. 检测是否需要套件模式
@@ -138,7 +214,7 @@ Agent 将加载 Repo2Skill，依次执行：
 
 ## 工作流：分步执行
 
-如果你不想一次性跑完整个流水线，可以通过 `repo2skill-skill/scripts/` 中的脚本分步执行：
+如果你不想一次性跑完整个流水线，可以直接调用 `scripts/` 中的脚本分步执行。下方示例使用开发仓库内的路径 `repo2skill-skill/scripts/`；**部署后** 路径变为 `<agent_skills_dir>/repo2skill/scripts/`，参数完全相同。
 
 ```bash
 # 步骤 1：解构 —— 分析仓库，生成 analysis.json

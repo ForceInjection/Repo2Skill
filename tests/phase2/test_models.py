@@ -20,7 +20,7 @@ class TestSkillCandidate:
             id="sk1",
             name="Test Skill",
             description="A test skill",
-            conditions=Conditions(trigger="Test trigger"),
+            conditions=Conditions(triggers=["Test trigger"]),
             policy=Policy(type="function", entry="test.main", steps=["Step 1", "Step 2"]),
             termination=Termination(success="Done"),
             interface=Interface(params={"x": "int"}, allowed_tools=["Read"]),

@@ -146,3 +146,79 @@ class TestG1Scan:
             high = [f for f in report.findings if f["severity"] == "high"]
             # Both eval and exec across different files
             assert len(high) >= 2
+
+
+class TestG1AssetBundling:
+    """Tests for G1 rules detecting hardcoded paths and embedded secrets (paper §3.3.3, §7)."""
+
+    def test_hardcoded_unix_path_detected(self, tmp_path):
+        """Hardcoded /home/ or /Users/ paths should be flagged."""
+        skill_dir = tmp_path / "test-skill"
+        scripts_dir = skill_dir / "scripts"
+        scripts_dir.mkdir(parents=True)
+        (scripts_dir / "config.py").write_text('DATA_DIR = "/home/user/data"\n')
+
+        report = run_g1_scan(skill_dir)
+        medium_findings = [f for f in report.findings if f["severity"] == "medium"]
+        assert any("hardcoded absolute path" in f["description"] for f in medium_findings), \
+            f"No hardcoded path finding in: {medium_findings}"
+
+    def test_hardcoded_windows_path_detected(self, tmp_path):
+        """Hardcoded C:\\ paths should be flagged."""
+        skill_dir = tmp_path / "test-skill"
+        scripts_dir = skill_dir / "scripts"
+        scripts_dir.mkdir(parents=True)
+        (scripts_dir / "setup.py").write_text('TOOL_PATH = "D:/Program Files/tool.exe"\n')
+
+        report = run_g1_scan(skill_dir)
+        medium_findings = [f for f in report.findings if f["severity"] == "medium"]
+        assert any("Windows drive-letter path" in f["description"] for f in medium_findings)
+
+    def test_embedded_secret_detected(self, tmp_path):
+        """API_KEY = 'long-string...' should be flagged as high."""
+        skill_dir = tmp_path / "test-skill"
+        scripts_dir = skill_dir / "scripts"
+        scripts_dir.mkdir(parents=True)
+        (scripts_dir / "auth.py").write_text(
+            'API_KEY = "sk-abcdefghijklmnopqrstuvwxyz123456"\n'
+        )
+
+        report = run_g1_scan(skill_dir)
+        high_findings = [f for f in report.findings if f["severity"] == "high"]
+        assert any("embedded credential" in f["description"] for f in high_findings), \
+            f"Expected embedded credential finding, got: {high_findings}"
+
+    def test_short_string_not_flagged(self, tmp_path):
+        """Short string values should NOT be flagged as secrets."""
+        skill_dir = tmp_path / "test-skill"
+        scripts_dir = skill_dir / "scripts"
+        scripts_dir.mkdir(parents=True)
+        (scripts_dir / "config.py").write_text('api_key = "short"\n')
+
+        report = run_g1_scan(skill_dir)
+        high_findings = [f for f in report.findings if f["severity"] == "high"]
+        assert not any("embedded credential" in f["description"] for f in high_findings), \
+            "Short string should not trigger secret detection"
+
+    def test_env_var_with_secret_like_name_detected(self, tmp_path):
+        """os.getenv('API_SECRET') should be flagged (low severity)."""
+        skill_dir = tmp_path / "test-skill"
+        scripts_dir = skill_dir / "scripts"
+        scripts_dir.mkdir(parents=True)
+        (scripts_dir / "config.py").write_text('import os\nos.getenv("API_SECRET")\n')
+
+        report = run_g1_scan(skill_dir)
+        low_findings = [f for f in report.findings if f["severity"] == "low"]
+        assert any("secret-like key name" in f["description"] for f in low_findings)
+
+    def test_relative_path_not_flagged(self, tmp_path):
+        """Relative paths should NOT trigger the hardcoded path rule."""
+        skill_dir = tmp_path / "test-skill"
+        scripts_dir = skill_dir / "scripts"
+        scripts_dir.mkdir(parents=True)
+        (scripts_dir / "config.py").write_text('DATA_DIR = "./data"\n')
+
+        report = run_g1_scan(skill_dir)
+        medium_findings = [f for f in report.findings if f["severity"] == "medium"]
+        assert not any("hardcoded absolute path" in f["description"] for f in medium_findings), \
+            f"Relative path should not trigger: {medium_findings}"

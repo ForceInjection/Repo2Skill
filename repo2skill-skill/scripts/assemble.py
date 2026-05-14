@@ -13,6 +13,11 @@ import json
 import sys
 from pathlib import Path
 
+# Allow running from a deployed skill directory where the `repo2skill` package
+# is vendored as a sibling of `scripts/`. In dev mode (pip install -e .) the
+# installed package is found first and this path entry is harmless.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from repo2skill.models import AnalysisResult, Skill, SuiteConfig
 from repo2skill.suite import assemble_suite, infer_relations, validate_dag
 

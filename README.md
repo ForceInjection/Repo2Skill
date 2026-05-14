@@ -28,7 +28,7 @@ Anthropic 的 Agent Skills 协议标准化了技能封装方式（`SKILL.md` + f
 
 ## 工作原理
 
-```
+```text
 [源码仓库]
     │
     ▼
@@ -54,13 +54,13 @@ structure.py ───► analysis.json ───► Agent (Extractor)
 
 **角色分工**（Python = 机械，Agent = 判断）：
 
-| 角色 | 执行主体 | 职责 |
-|------|----------|------|
-| **Structurer** | 确定性脚本 | AST 解析、依赖图构建、四元组预标注（docstring → trigger，签名 → params）。**不过滤、不推断、不判断。** |
-| **Extractor** | Agent | 5 步筛选（Filter 去噪 → Merge 合并 → Score 评分 → Present 展示 → Enrich 重写） |
-| **Assembler** | 确定性脚本 | Jinja2 模板渲染 → 技能目录（模板基线，Agent 后续重写） |
-| **Reviewer G1** | 确定性脚本 | 正则/AST 静态扫描 → `g1_report.json` |
-| **Reviewer G2** | Agent | 3 维度语义审查 → 评分写入 `skill.yaml` |
+| 角色            | 执行主体   | 职责                                                                                                   |
+| --------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
+| **Structurer**  | 确定性脚本 | AST 解析、依赖图构建、四元组预标注（docstring → trigger，签名 → params）。**不过滤、不推断、不判断。** |
+| **Extractor**   | Agent      | 5 步筛选（Filter 去噪 → Merge 合并 → Score 评分 → Present 展示 → Enrich 重写）                         |
+| **Assembler**   | 确定性脚本 | Jinja2 模板渲染 → 技能目录（模板基线，Agent 后续重写）                                                 |
+| **Reviewer G1** | 确定性脚本 | 正则/AST 静态扫描 → `g1_report.json`                                                                   |
+| **Reviewer G2** | Agent      | 3 维度语义审查 → 评分写入 `skill.yaml`                                                                 |
 
 ---
 
@@ -113,13 +113,13 @@ Repo2Skill/
 
 ## 阶段概览
 
-| 阶段 | 名称          | 退出条件 | 状态 |
-| ---- | ------------- | -------- | ---- |
-| 1    | 核心流水线    | Python 仓库 → `SKILL.md`，端到端跑通 | ✅ |
-| 2    | G1 + G2       | 静态扫描 + 语义审查；Trust Level L0–L2；Agent Enrich | ✅ |
-| 3    | G3 + G4       | Docker 沙箱 + 权限比对；完整的 L0–L4 | ⬜ 规划中 |
-| 4    | 多语言 + 套件 | JS/TS、Go、Rust；套件已提前实现 | 🔶 |
-| 5    | 自举 + 生态   | Repo2Skill 自我生成；注册中心对接 | ⬜ |
+| 阶段 | 名称          | 退出条件                                             | 状态      |
+| ---- | ------------- | ---------------------------------------------------- | --------- |
+| 1    | 核心流水线    | Python 仓库 → `SKILL.md`，端到端跑通                 | ✅        |
+| 2    | G1 + G2       | 静态扫描 + 语义审查；Trust Level L0–L2；Agent Enrich | ✅        |
+| 3    | G3 + G4       | Docker 沙箱 + 权限比对；完整的 L0–L4                 | ⬜ 规划中 |
+| 4    | 多语言 + 套件 | JS/TS、Go、Rust；套件已提前实现                      | 🔶        |
+| 5    | 自举 + 生态   | Repo2Skill 自我生成；注册中心对接                    | ⬜        |
 
 ---
 

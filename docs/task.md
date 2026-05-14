@@ -104,7 +104,9 @@
 | P3-T7 | 🔶   | `--non-interactive` 模式 | [§5.2](./design.md#52-非交互模式)                                         | P3-T6 | CLI 标志：`--non-interactive`、`--confidence-threshold`、`--skip-g3`                | 批量处理 10 个仓库的脚本一次性完成；失败项记入 `batch_summary.json`，不阻塞后续    |
 | P3-T8 | ⬜   | 端到端回归测试           | [§10](./design.md#10-自举与自我进化)                                      | P3-T7 | `tests/e2e/fixtures/` 内含 3 个代表性仓库                                           | CI 上完整 G1–G4 流程耗时 < 8 分钟；生成技能全部达到 L3 或以上                      |
 
-> **P3-T7 备注**：`--non-interactive` 和 `--confidence-threshold` 已在 Phase 2 提前实现。`--skip-g3` 和批量处理脚本待 Phase 3。
+> **P3-T7 备注**：`--non-interactive` 和 `--confidence-threshold` 已在 Phase 2 提前实现。`--skip-g3` 占位标志已加入 CLI，批量处理脚本待 Phase 3。
+>
+> **Phase 3 待补齐文件**（design §4 列出但未创建）：`audit_g3.py`、`audit_g4.py`、`templates/verify_script.py.j2`、`examples/sample_repo/`。
 
 ---
 

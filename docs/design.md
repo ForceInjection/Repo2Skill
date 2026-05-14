@@ -166,21 +166,24 @@ Repo2Skill 自身的技能包文件树如下。所有运行时产物（如 `veri
 
 ```text
 repo2skill-skill/
-├── SKILL.md                     # 技能入口，完整流程描述
+├── SKILL.md                     # 技能入口，完整流程描述（含 Extractor 5-step + Enrich Guide）
+├── skill.yaml                   # Repo2Skill 自身元数据
 ├── scripts/
 │   ├── requirements.txt         # Python 依赖清单
 │   ├── structure.py             # Structurer：仓库分析，输出 analysis.json（四元组格式）
+│   ├── extract.py               # Extractor 基线：规则评分，生成 candidates.json（提示）
 │   ├── assemble.py              # 将确认后的技能摘要编译为标准 SKILL.md 及文件夹
 │   ├── audit_g1.py              # G1 静态安全扫描
 │   ├── audit_g2.py              # G2 语义审查辅助（生成检查提示，实际审查由 Agent 执行）
-│   ├── audit_g3.py              # G3 沙箱验证（Docker 隔离执行）
-│   └── audit_g4.py              # G4 权限清单校验
-├── templates/
+│   ├── audit_g3.py              # ⚠️ Phase 3 — G3 沙箱验证（Docker 隔离执行）
+│   └── audit_g4.py              # ⚠️ Phase 3 — G4 权限清单校验
+├── templates/ → ../../templates  # Jinja2 模板（通过 Python package 路径解析）
 │   ├── skill.md.j2              # SKILL.md 模板（含 Security 章节）
 │   ├── skill.yaml.j2            # skill.yaml 清单模板
-│   └── verify_script.py.j2      # G3 验证任务脚本模板
+│   ├── suite.yaml.j2            # 套件元数据模板
+│   └── verify_script.py.j2      # ⚠️ Phase 3 — G3 验证任务脚本模板
 └── examples/
-    └── sample_repo/             # 自测用简单仓库（可选）
+    └── sample_repo/             # ⚠️ Phase 3 — 自测用简单仓库（可选）
 ```
 
 生成技能的目录中会追加：

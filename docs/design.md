@@ -4,9 +4,7 @@
 
 **版本**：1.0
 **日期**：2026-05-13
-**状态**：Phase 1 完成，Phase 2 推进中（~85%），Suite Mode（Phase 4 范围）提前实现
-
-> **实现状态速查**：各章节中标记 ⚠️ 表示该项属于 Phase 3+ 范围，当前版本（v0.2.0）尚未实现。完整状态见 [task.md](./task.md) 当前状态摘要与实现偏离记录。
+**状态**：Phase 1+2 完成，Suite Mode 实现，Extractor Agent 增强（5-step 提取 + Enrich 重写）完成。Phase 3（G3/G4）规划中。
 
 ---
 
@@ -286,29 +284,35 @@ trust-level: L3 # 套件共享的信任等级，取成员中的最低值
 步骤 3: 组装 (Assemble)
   ▶ Agent 将选定的技能整理为确认后的 JSON
   ▶ 执行: python scripts/assemble.py --skill-json confirmed.json --out ./my-tool-skill
-  ▶ 输出: 技能文件夹，包含 SKILL.md、skill.yaml、依赖脚本等
+  ▶ 输出: 技能文件夹（模板填充的初始版本），包含 SKILL.md、skill.yaml、依赖脚本等
+
+步骤 3.5: 内容增强 (Agent Enrich) ★
+  ▶ Agent 读取组装后的 SKILL.md，对照 analysis.json 和源码理解，进行实质性改写
+  ▶ 改写内容：将 "Use func()" 步骤替换为自然语言操作指令、用功能性名称替换模块路径命名、
+     用 readme_summary + 函数用途组合 description、清理 __future__/stdlib 依赖、推断 allowed-tools
+  ▶ 输出：同一文件被 Agent 覆写为高质量 Agent 指令
 
 步骤 4: G1 静态安全扫描
   ▶ 执行: python scripts/audit_g1.py ./my-tool-skill
   ▶ 输出: g1_report.json
   ▶ 若发现高危项，Agent 立即警告用户
 
-步骤 5: G2 语义审查 (Agent 自主执行)
+步骤 6: G2 语义审查 (Agent 自主执行)
   ▶ 执行: python scripts/audit_g2.py（生成审查提示）
   ▶ Agent 对比原始源码与生成的技能描述，评估完整性、幻觉风险、prompt 注入
   ▶ 给出数值评级（映射规则见下文），并附解释
 
-步骤 6: G3 沙箱验证 (需用户批准) ⚠️ Phase 3 — 当前版本未实现
+步骤 7: G3 沙箱验证 (需用户批准) ⚠️ Phase 3 — 当前版本未实现
   ▶ Agent 先询问："需要进行沙箱验证吗？这将在 Docker 中执行生成的技能。"
   ▶ 用户同意后，Agent 根据技能功能生成一个验收测试场景（如："对 test.py 执行格式化，检查输出是否为有效 Python"）
   ▶ 执行: python scripts/audit_g3.py --skill ./my-tool-skill --test "..."
   ▶ 输出: g3_report.json（包含执行日志、资源用量、是否通过）
 
-步骤 7: G4 权限清单校验 ⚠️ Phase 3 — 当前版本未实现
+步骤 8: G4 权限清单校验 ⚠️ Phase 3 — 当前版本未实现
   ▶ 执行: python scripts/audit_g4.py --skill ./my-tool-skill --g3-log g3_report.json
   ▶ 输出: g4_report.json，确认技能未超出声明的 allowed-tools
 
-步骤 8: 汇总与完成
+步骤 9: 汇总与完成
   ▶ Agent 呈现最终报告，包含：
     - 生成的技能位置
     - Trust Level（基于 G1–G4 全部通过的最高等级）

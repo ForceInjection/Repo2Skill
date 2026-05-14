@@ -3,7 +3,7 @@
 **配套设计文档**：[design.md](./design.md)
 **版本**：1.0
 **日期**：2026-05-13
-**状态**：Phase 1 完成，Phase 2 推进中（~85%），Suite Mode（Phase 4 范围）提前实现
+**状态**：Phase 1+2 完成，Suite Mode + Agent Enrich 实现，Phase 4 套件提前（5/9）。Phase 3（G3/G4）规划中。
 
 本文档将 [design.md](./design.md) §11 开发路线图中的五个阶段展开为可追踪、可验收的具体任务。每条任务包含：
 
@@ -38,12 +38,16 @@
 | 指标       | 数值                                    |
 | ---------- | --------------------------------------- |
 | 总任务数   | 42                                      |
-| 已完成     | 20 (Phase 1: 9, Phase 2: 7, Phase 4: 4) |
-| 部分完成   | 3 (P2-T7, P3-T7, Phase 4 套件)          |
-| 测试数量   | 62 (8 smoke + 54 phase2)                |
+| 已完成     | 21 (Phase 1: 9, Phase 2: 7, Phase 4: 5) |
+| 部分完成   | 2 (P2-T7, P3-T7)                        |
+| 测试数量   | 65 (8 smoke + 57 phase2)                |
 | 测试通过率 | 100%                                    |
 
-**架构决定**：Agent（Claude Code）承担所有 LLM 推理（Extractor + Reviewer G2），Python 脚本仅做确定性工作。无 API key 传入 Python 文件，无 `llm_client.py` / `extractor_llm.py`。
+**架构决定**：
+- Agent（Claude Code）承担所有 LLM 推理：Extractor (5-step 筛选+合并+评分)、Enrich (SKILL.md 内容重写)、Reviewer G2 (3 维度审查)
+- Python 脚本仅做确定性工作：AST 解析、依赖图构建、机械式四元组预标注、Jinja2 模板渲染、正则安全扫描
+- Structurer 产出全量 `analysis.json`（无过滤、无质量判断），Agent 自主筛选和重写
+- 新增 Enrich 步骤：Agent 在组装后对 SKILL.md 进行实质性改写（Steps 从 "Use func()" → 自然语言，名称从模块路径 → 功能性命名）
 
 ---
 
@@ -107,7 +111,7 @@
 ## Phase 4 多语言扩展与技能套件
 
 **目标**：覆盖 JS/TS、Go、Rust；支持将复杂仓库映射为相关联的技能套件。
-**状态**：⬜ 多语言未开始；🔶 套件模式提前实现（P4-T3/T4/T5/T6 完成）
+**状态**：⬜ 多语言未开始；🔶 套件模式提前实现（P4-T3/T4/T5/T6/T9 完成，5/9）
 
 | ID    | 状态 | 标题                       | 设计锚点                                                                             | 依赖  | 交付物                                                                    | 验收标准                                                                                                                          | 实现备注                                                                                                                    |
 | ----- | ---- | -------------------------- | ------------------------------------------------------------------------------------ | ----- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
@@ -119,7 +123,7 @@
 | P4-T6 | ✅   | `assemble.py --suite`      | [§5.4](./design.md#54-套件模式执行调整)                                              | P4-T5 | 扩展 `assemble.py`：一次性生成 `<output-suite>/` 与所有子技能             | 子技能目录数 = 识别出的技能数；顶层 `README.md` 自动生成                                                                          | `assemble_suite()` 生成 suite.yaml + 调用 `assemble_skill()` 生成各子技能目录；`_write_suite_readme()` 自动生成 `README.md` |
 | P4-T7 | ⬜   | 跨技能集成测试             | [§5.4](./design.md#54-套件模式执行调整)                                              | P4-T6 | 端到端流水线生成器：按 `requires-output-from` 链路串联                    | 对 `data-pipeline` 套件生成 ≥ 1 条覆盖全部成员的流水线测试                                                                        |                                                                                                                             |
 | P4-T8 | ⬜   | 套件级 Trust Level         | [§6.1](./design.md#61-trust-level-计算)、[§2.5](./design.md#25-技能套件-skill-suite) | P4-T7 | 取成员最低值 + 关系完整性补偿                                             | 当任一成员 < L2 时套件 ≤ L2；关系图不完整时套件降一级                                                                             | 当前套件写死 L1                                                                                                             |
-| P4-T9 | ⬜   | SkillNet 本体写入          | [§8.3](./design.md#83-skillnet-本体标注)                                             | P4-T6 | `skill.yaml.ontology.relations` 与 `skill.yaml.dependencies` 字段自动填充 | 四种关系类型（`depends-on`/`composes`/`bundled-with`/`requires-output-from`）均可生成；`dependencies` 按 §12.2 结构写入运行时依赖 | 关系在 `suite.yaml` 中生成；`assemble_suite()` 自动将每个子技能作为 source 的关系注入其 `skill.yaml.ontology.relations`；仅 bundled-with 关系常见，depends-on/requires-output-from 取决于模块依赖图与 skill 映射的精度 |
+| P4-T9 | ✅   | SkillNet 本体写入          | [§8.3](./design.md#83-skillnet-本体标注)                                             | P4-T6 | `skill.yaml.ontology.relations` 与 `skill.yaml.dependencies` 字段自动填充 | 四种关系类型（`depends-on`/`composes`/`bundled-with`/`requires-output-from`）均可生成；`dependencies` 按 §12.2 结构写入运行时依赖 | `assemble_suite()` 自动从 suite_config.relations 筛选各子技能的关系注入其 `skill.yaml.ontology.relations`；目前以 bundled-with 为主，depends-on/requires-output-from 需加强模块→技能映射精度 |
 
 ---
 
